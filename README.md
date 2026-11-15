@@ -1,24 +1,25 @@
 # NOVA
 
-NOVA — социальный коммуникационный продукт. Текущая версия — первый вертикальный срез, а не готовая социальная сеть: нативное Android-приложение, базовый NestJS/PostgreSQL API и отдельный небольшой web-клиент для сценария двух пользователей и текстового сообщения. Android-клиент — APK, не WebView-сайт.
+NOVA — коммуникационный продукт. Сейчас реализован первый вертикальный срез: нативное Android-приложение, NestJS/PostgreSQL API и отдельный небольшой web-клиент для сценария двух пользователей и текстового сообщения. Android-клиент — APK, не WebView.
 
 ## Структура проекта
 
-- `android/` — Kotlin + Jetpack Compose (`applicationId=io.nova.app`, `minSdk=26`), без Expo/WebView.
-- `backend/` — модульный NestJS backend, PostgreSQL migrations, REST API с версиями и realtime через Socket.IO.
+- `android/` — Kotlin + Jetpack Compose (`applicationId=io.nova.app`, `minSdk=26`), включая adaptive/round launcher icons.
+- `backend/` — NestJS API, PostgreSQL migrations, REST и Socket.IO.
 - `web/` — отдельный клиент Next.js/React/TypeScript.
-- `shared/` — общий OpenAPI-контракт и описание realtime-событий.
-- `docs/` — архитектура, инструкции запуска/выпуска и ссылки на выбранные открытые upstream-проекты.
-- `.github/workflows/ci.yml` — GitHub Actions CI для backend, web, Android debug APK и защищённой release-сборки.
+- `shared/` — OpenAPI-контракт и описание realtime-событий.
+- `AGENTS.md` — постоянные instructions для безопасной разработки NOVA UI на Android и web.
+- `docs/` — архитектура, запуск/release, открытые источники и их лицензии.
+- `.github/workflows/ci.yml` — GitHub Actions для backend, web, Android debug APK и защищённой release-сборки.
 
 ## Текущий статус
 
-Android debug APK собирается, JVM unit tests проходят. Это APK для разработки/тестирования, подписанный debug-сертификатом; он **не является production release APK**. Проверены backend typecheck/build/unit tests и web lint/typecheck/production build. Для npm-зависимостей backend и web audit не выявил уязвимостей на момент последней локальной проверки.
+Android APK обновлён до версии `0.1.1` (`versionCode=2`). В манифест добавлена собственная adaptive и round launcher icon NOVA — мятный фон и тёмная буква N. Локальная сборка, AAPT icon metadata и `apksigner` прошли проверку; commit с иконкой прошёл полный [GitHub Actions run 43705547258](https://github.com/derector/NOVA/actions/runs/43705547258), включая backend/PostgreSQL migration и health smoke, web checks, Android APK и unit tests. Release job пропускается на обычном push и требует отдельной production-подписи.
 
-Исходники опубликованы в публичном [GitHub-репозитории derector/NOVA](https://github.com/derector/NOVA), ветка `main`. Последний [GitHub Actions run](https://github.com/derector/NOVA/actions/runs/43704156088) успешно выполнил backend/PostgreSQL миграцию и health smoke, web lint/typecheck/build/audit, Android debug APK и JVM unit tests; debug APK загружен как artifact. Release job пропущен по условию version tag и не является production release. Реальная отправка OTP, production hosting, HTTPS/WSS API и сквозной обмен между двумя клиентами ещё не проверены. Production APK потребует настроенных hosting/SMTP, своего защищённого signing key и публичного HTTPS API URL.
+Выданный APK — debug/test build, подписанный debug-сертификатом, не production release. Email-вход на телефоне **не заработает**, пока к приложению не подключён публично доступный backend и не настроен настоящий SMTP-провайдер. В текущем debug APK `http://10.0.2.2:3001` работает только для Android Emulator с backend на машине-разработчике. Web-клиент есть в исходниках, но публичный сайт пока не развёрнут.
 
-Подробный объём и границы проверок перечислены в [`TODO.md`](TODO.md), запуск/сборка/подпись — в [`docs/build-and-deploy.md`](docs/build-and-deploy.md), а выбранные открытые репозитории и ограничения аудита — в [`docs/research-sources.md`](docs/research-sources.md).
+## Разработка и проверки
 
-## Секреты и приватность
+Перед UI-изменениями используйте [инструкции проекта](AGENTS.md). В них адаптированы безопасные практики для Android и Next.js из пяти проверенных GitHub-источников. Обзор репозиториев, лицензий, применимости и ограничений: [design skills review](docs/design-skills-review.md). История архитектурных решений и границы реализации: [TODO.md](TODO.md) и [architecture.md](docs/architecture.md). Команды запуска и сборки: [build-and-deploy.md](docs/build-and-deploy.md).
 
 Не добавляйте в репозиторий SMTP credentials, `APP_SECRET`, production database URL, ключи Firebase/object storage или Android release keystore. Email — приватные данные аккаунта: публичный поиск и участники чатов получают только ID, username и display name.

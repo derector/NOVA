@@ -4,15 +4,15 @@
 
 ## 0. Нативная основа Android — IMPLEMENTED; проверка на устройстве ожидает
 
-Нативный Kotlin + Jetpack Compose проект использует `applicationId=io.nova.app`, `minSdk=26`, `targetSdk=35`; это приложение в APK, а не оболочка WebView/Expo. Room хранит чаты, сообщения и outbox; WorkManager повторяет отправку при доступной сети с backoff; Android Keystore защищает локальный ключевой материал сессии.
+Нативный Kotlin + Jetpack Compose проект использует `applicationId=io.nova.app`, `minSdk=26`, `targetSdk=35`, `versionCode=2`, `versionName=0.1.1`; это APK, а не оболочка WebView/Expo. Manifest содержит собственные adaptive и round launcher icons: мятный фон и фирменную N. Room хранит чаты, сообщения и outbox; WorkManager повторяет отправку при доступной сети с backoff; Android Keystore защищает локальный ключевой материал сессии.
 
-На итоговом исходном коде локально успешно выполнены `:app:assembleDebug`, `:app:testDebugUnitTest`, проверка package/SDK metadata через AAPT и проверка подписи через `apksigner`. Debug APK размером 11 МБ подписан debug-ключом. Gradle release-конфигурация успешно собиралась и проверялась по подписи с временным тестовым keystore; тестовый ключ и release APK удалены. Не запускались установка/исполнение на Android emulator/device, проверка Android API 26 и миграция обновления существующей установки; production ключ подписи не предоставлен.
+На текущем исходном коде успешно выполнены `:app:assembleDebug`, `:app:testDebugUnitTest`, проверка package/SDK/icon metadata через AAPT и подписи через `apksigner`. Debug APK размером около 11 МБ подписан debug-ключом; hosted CI run [43705547258](https://github.com/derector/NOVA/actions/runs/43705547258) также собрал APK с иконкой и запустил JVM tests. Gradle release-конфигурация ранее собиралась и проверялась по подписи с временным тестовым keystore; тестовый ключ и release APK удалены. Установка/исполнение на реальном Android device и проверка API 26 не выполнялись; production ключ подписи не предоставлен. Debug build с новым случайным CI signing certificate не обновляет предыдущий APK поверх старого: для установки потребуется удалить прежнюю debug-версию, что удалит её локальные данные.
 
 ## 1. Backend, данные и API-контракт — IMPLEMENTED; DB integration/deployment ожидают
 
 Реализованы модульный NestJS backend, PostgreSQL DDL/migration, validation, авторизованные endpoint-ы и Swagger/OpenAPI 3.1. Общий REST контракт — `shared/openapi.yaml`, события Socket.IO и правила reconnect/catch-up — `shared/events.md`. PostgreSQL хранит OTP challenges, sessions, accounts, участников личных чатов, сообщения и rate-limit buckets. SQL-параметры передаются отдельно; закрытые операции проверяют членство в чате.
 
-Публичный поиск и участники чатов не выбирают и не возвращают email аккаунтов; regression-тесты проверяют оба пути. Локально успешно прошли TypeScript typecheck/build, 5 unit tests и npm audit (0 high-severity findings). Runtime Swagger отдал все 10 API paths; запрос с некорректным DTO завершился HTTP 400. В среде не было работающего PostgreSQL, поэтому фактическое выполнение migration, health с БД и DB-backed HTTP-сценарии не проверены. Workflow CI настроен на запуск PostgreSQL и этих smoke checks, но сам GitHub workflow ещё не запускался.
+Публичный поиск и участники чатов не выбирают и не возвращают email аккаунтов; regression-тесты проверяют оба пути. Локально успешно прошли TypeScript typecheck/build, 5 unit tests и npm audit (0 high-severity findings). GitHub Actions run [43705547258](https://github.com/derector/NOVA/actions/runs/43705547258) успешно запустил PostgreSQL, выполнил migrations и database-backed health smoke вместе с backend tests/build/audit. Два пользовательских клиента, реальная SMTP-доставка и полный chat E2E всё ещё не проверены.
 
 ## 2. Email OTP, аккаунт, сессия и профиль — IMPLEMENTED; реальная SMTP-доставка заблокирована настройками
 
@@ -34,7 +34,7 @@ REST API личных чатов работает с PostgreSQL и провер�
 
 ## 5. HTTPS, secrets, GitHub remote и CI — IN DEVELOPMENT
 
-Исходники опубликованы в публичном [`derector/NOVA`](https://github.com/derector/NOVA), ветка `main`; последний GitHub Actions run [43704156088](https://github.com/derector/NOVA/actions/runs/43704156088) прошёл. Hosted CI выполнил PostgreSQL migration и database health smoke, backend typecheck/unit tests/build/audit, web lint/typecheck/production build/audit и Android debug APK/JVM unit tests; Android APK artifact загружен. Release job штатно пропущен, поскольку запускается только на version tag и требует отдельно настроенных signing secrets/production HTTPS URL.
+Исходники опубликованы в публичном [`derector/NOVA`](https://github.com/derector/NOVA), ветка `main`; run [43705547258](https://github.com/derector/NOVA/actions/runs/43705547258) прошёл после добавления adaptive icon. Hosted CI выполнил PostgreSQL migration и database health smoke, backend typecheck/unit tests/build/audit, web lint/typecheck/production build/audit и Android debug APK/JVM unit tests; APK artifact загружен. Release job штатно пропущен, поскольку запускается только на version tag и требует отдельно настроенных signing secrets/production HTTPS URL.
 
 Backend нужно развернуть за публичным HTTPS/WSS; PostgreSQL должен надёжно сохранять данные. Публичный deployment target, SMTP provider и production PostgreSQL не настроены. OpenAPI privacy contracts проверены локально.
 

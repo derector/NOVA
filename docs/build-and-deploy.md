@@ -22,6 +22,10 @@ Web: из `web/` выполните `npm ci && npm run dev`. Next.js запус�
 
 Android: из `android/` выполните `./gradlew :app:assembleDebug :app:testDebugUnitTest`. Для Android Emulator debug URL по умолчанию — `http://10.0.2.2:3001`; другой backend задаётся через `NOVA_API_BASE_URL`. Незашифрованный HTTP разрешён только в debug-сборке.
 
+APK v0.1.1 включает adaptive и round launcher icon NOVA; проверьте icon metadata в собранном package.
+
+> **Важно при установке:** APK из CI подписывается debug-ключом, который может меняться между запусками. Из-за этого новая debug-сборка может не устанавливаться поверх ранее скачанного APK. Удаление старой версии перед установкой удалит её локальные данные; для безопасного обновления будущих версий нужен постоянный release signing key.
+
 ## CI
 
 `.github/workflows/ci.yml` закрепляет GitHub Actions полными commit SHA. В workflow настроено следующее:
@@ -31,7 +35,7 @@ Android: из `android/` выполните `./gradlew :app:assembleDebug :app:t
 - Android debug APK и JVM unit tests, с загрузкой APK как artifact;
 - отдельный release job по version tag, защищённый GitHub Environment.
 
-Workflow опубликован в [GitHub-репозитории NOVA](https://github.com/derector/NOVA). Последний [run 43704156088](https://github.com/derector/NOVA/actions/runs/43704156088) прошёл: PostgreSQL migration и database health smoke, backend checks, web lint/typecheck/build/audit, Android debug assembly/unit tests и artifact upload. Signed release job не запускался, поскольку его условие — version tag `v…`; для него также требуются production HTTPS API URL и настроенный signing keystore в GitHub Environment.
+Workflow опубликован в [GitHub-репозитории NOVA](https://github.com/derector/NOVA). Run [43705547258](https://github.com/derector/NOVA/actions/runs/43705547258) прошёл после изменения Android icon resources: PostgreSQL migration и database health smoke, backend checks, web lint/typecheck/build/audit, Android debug assembly/unit tests и artifact upload. Signed release job не запускался, поскольку его условие — version tag `v…`; для него также требуются production HTTPS API URL и настроенный signing keystore в GitHub Environment.
 
 ## Подписанный release APK
 
