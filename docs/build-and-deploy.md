@@ -31,7 +31,7 @@ Android: из `android/` выполните `./gradlew :app:assembleDebug :app:t
 - Android debug APK и JVM unit tests, с загрузкой APK как artifact;
 - отдельный release job по version tag, защищённый GitHub Environment.
 
-Workflow опубликован в [GitHub-репозитории NOVA](https://github.com/derector/NOVA). После устранения ошибки workflow parser backend/PostgreSQL и web jobs прошли; Android job завершился на `setup-android`, который пытался установить устаревший пакет `tools`. Исправление ограничивает список пакетов до `platform-tools`; повторный hosted CI ожидается после отправки commit с этим fix.
+Workflow опубликован в [GitHub-репозитории NOVA](https://github.com/derector/NOVA). [Run 43703832657](https://github.com/derector/NOVA/actions/runs/43703832657) прошёл: PostgreSQL migration и database health smoke, backend checks, web lint/typecheck/build/audit, Android debug assembly/unit tests и artifact upload. Signed release job не запускался, поскольку его условие — version tag `v…`; для него также требуются production HTTPS API URL и настроенный signing keystore в GitHub Environment.
 
 ## Подписанный release APK
 
