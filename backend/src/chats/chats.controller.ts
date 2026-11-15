@@ -4,7 +4,7 @@ import { isUUID } from 'class-validator';
 import { AuthenticatedRequest, JwtAuthGuard } from '../auth/auth.guard';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { ChatsService } from './chats.service';
-import { ChatIdParam, CreateDirectChatDto, ListMessagesQuery, MessageIdParam, SendMessageDto } from './chats.dto';
+import { ChatIdParam, CreateDirectChatDto, ListMessagesQuery, MessageIdParam, NotificationPreferenceDto, SendMessageDto } from './chats.dto';
 
 const publicUserSchema = {
   type: 'object' as const,
@@ -17,7 +17,7 @@ const chatSchema = {
   type: 'object' as const,
   required: ['id', 'participant', 'updatedAt'],
   properties: {
-    id: { type: 'string', format: 'uuid' }, participant: publicUserSchema, updatedAt: { type: 'string', format: 'date-time' },
+    id: { type: 'string', format: 'uuid' }, participant: publicUserSchema, updatedAt: { type: 'string', format: 'date-time' }, unreadCount: { type: 'integer' }, mutedUntil: { type: 'string', format: 'date-time', nullable: true },
   },
 };
 const messageSchema = {
@@ -62,6 +62,12 @@ export class ChatsController {
   @ApiResponse({ status: 403, description: 'User cannot access this chat.' })
   messages(@Req() req: AuthenticatedRequest, @Param() params: ChatIdParam, @Query() query: ListMessagesQuery) {
     return this.chats.listMessages(req.auth!.userId, params.chatId, query.after, query.limit);
+  }
+
+  @Post(':chatId/notifications')
+  @HttpCode(HttpStatus.OK)
+  async notifications(@Req() req: AuthenticatedRequest, @Param() params: ChatIdParam, @Body() body: NotificationPreferenceDto) {
+    return this.chats.updateNotificationPreference(req.auth!.userId, params.chatId, body.mutedUntil ?? null, body.previewEnabled ?? true);
   }
 
   @Post(':chatId/read')

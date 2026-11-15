@@ -371,7 +371,9 @@ export default function HomePage() {
         : chat).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)));
     });
     socket.on('notification:new', (notification: { type?: string; chatId?: string }) => {
-      if (notification?.type === 'message' && notification.chatId && notification.chatId !== selectedChatRef.current) {
+      const chat = notification.chatId ? chatsRef.current.find((item) => item.id === notification.chatId) : undefined;
+      const muted = Boolean(chat?.mutedUntil && Date.parse(chat.mutedUntil) > Date.now());
+      if (notification?.type === 'message' && notification.chatId && notification.chatId !== selectedChatRef.current && !muted) {
         setNotice('Новое сообщение в другом диалоге.');
       }
     });
@@ -416,6 +418,7 @@ export default function HomePage() {
       setMessagesLoadError('');
       void authenticatedFetch<{ chatId: string; messageIds: string[] }>(apiPath(`/chats/${selectedChatId}/read`), { method: 'POST' })
         .catch((error: unknown) => setNotice(`Не удалось подтвердить прочтение: ${getErrorMessage(error)}`));
+      setChats((current) => current.map((chat) => chat.id === selectedChatId ? { ...chat, unreadCount: 0 } : chat));
       const newest = newestMessage(items);
       if (newest) cursorRef.current[selectedChatId] = newest.id;
       setNotice('');
@@ -616,6 +619,15 @@ export default function HomePage() {
     finally { setMutatingMessageId(null); }
   }
 
+  async function toggleMute(chat: NovaChat) {
+    const mutedUntil = chat.mutedUntil && Date.parse(chat.mutedUntil) > Date.now() ? null : new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString();
+    try {
+      const preference = await authenticatedFetch<{ chatId: string; mutedUntil: string | null }>(apiPath(`/chats/${chat.id}/notifications`), { method: 'POST', body: JSON.stringify({ mutedUntil, previewEnabled: true }) });
+      setChats((current) => current.map((item) => item.id === chat.id ? { ...item, mutedUntil: preference.mutedUntil } : item));
+      setSuccess(preference.mutedUntil ? 'Уведомления этого диалога отключены на 8 часов.' : 'Уведомления этого диалога включены.');
+    } catch (error) { setNotice(`Не удалось изменить уведомления: ${getErrorMessage(error)}`); }
+  }
+
   const selectedChat = useMemo(() => chats.find((chat) => chat.id === selectedChatId) || null, [chats, selectedChatId]);
   const messagesLoading = selectedChatId !== null && loadingChatId === selectedChatId;
   const usernameValid = /^[A-Za-z0-9_]{3,32}$/.test(username.trim());
@@ -718,7 +730,7 @@ export default function HomePage() {
       {chats.map((chat) => <button key={chat.id} className={`chat-row${chat.id === selectedChatId ? ' chat-row-active' : ''}`} onClick={() => { if (chat.id === selectedChatId) return; setMessages([]); setMessagesLoadError(''); setLoadingChatId(chat.id); setSelectedChatId(chat.id); setNotice(''); setSuccess(''); }}>
             <span className="avatar">{(chat.participant.displayName || chat.participant.username || '?').slice(0, 1).toUpperCase()}</span>
             <span className="chat-row-copy"><span className="chat-row-name">{chat.participant.displayName || chat.participant.username}</span><span className="chat-row-sub">@{chat.participant.username || 'без username'}</span></span>
-            <span className="chat-row-time">{humanDate(chat.updatedAt)}</span>
+            <span className="chat-row-time">{chat.unreadCount ? <b className="unread-badge">{chat.unreadCount > 99 ? '99+' : chat.unreadCount}</b> : humanDate(chat.updatedAt)}</span>
           </button>)}
         </div>
         <div className="sidebar-foot"><span className="tiny-brand-mark"><Icon name="spark" size={14} /></span><span>Только ядро E2E</span><span className="sidebar-foot-line" /></div>
@@ -738,7 +750,7 @@ export default function HomePage() {
             <button className="mobile-back" onClick={() => { setMessages([]); setMessagesLoadError(''); setLoadingChatId(null); setSelectedChatId(null); }} aria-label="Назад к диалогам"><Icon name="back" /></button>
             <span className="avatar">{(selectedChat.participant.displayName || selectedChat.participant.username || '?').slice(0, 1).toUpperCase()}</span>
             <div className="conversation-person"><h2>{selectedChat.participant.displayName || selectedChat.participant.username}</h2><p>@{selectedChat.participant.username}</p></div>
-            <span className="conversation-state"><span className="connection-dot" />Личный диалог</span>
+            <span className="conversation-state"><button className="mute-button" type="button" onClick={() => void toggleMute(selectedChat)}>{selectedChat.mutedUntil ? 'Включить звук' : 'Без звука'}</button><span className="connection-dot" />Личный диалог</span>
           </div>
           <div className="conversation-scope"><span className="scope-pill">E2E SCOPE</span><span>Текстовая переписка · Без медиа и звонков</span></div>
           {notice && <div className="conversation-notice"><Notice onClose={() => setNotice('')}>{notice}</Notice></div>}

@@ -15,6 +15,8 @@ export interface NovaChat {
   id: string;
   participant: NovaPublicUser;
   updatedAt: string;
+  unreadCount?: number;
+  mutedUntil?: string | null;
 }
 
 export interface NovaMessage {

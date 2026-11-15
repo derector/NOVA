@@ -158,6 +158,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .chat-row-name { overflow: hidden; color: #e4e0f1; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .chat-row-sub, .chat-row-time { color: var(--faint); font-size: 10px; }
 .chat-row-time { align-self: flex-start; padding-top: 2px; }
+.unread-badge { display: inline-grid; min-width: 20px; height: 20px; place-items: center; padding: 0 5px; border-radius: 10px; color: #06251e; background: var(--cyan); font-size: 9px; }
 .sidebar-foot { position: absolute; right: 19px; bottom: 0; left: 19px; display: flex; align-items: center; gap: 8px; height: 49px; border-top: 1px solid var(--line); color: var(--faint); font-size: 10px; }
 .tiny-brand-mark { width: 20px; height: 20px; border-radius: 7px; }
 .sidebar-foot-line { flex: 1; }
@@ -188,6 +189,8 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .conversation-person h2 { overflow: hidden; margin: 0 0 4px; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-person p { margin: 0; color: var(--muted); font-size: 10px; }
 .conversation-state { display: inline-flex; align-items: center; gap: 7px; margin-left: auto; color: var(--muted); font-size: 10px; }
+.mute-button { padding: 4px 7px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: transparent; font: inherit; font-size: 9px; }
+.mute-button:hover { border-color: rgba(112, 225, 193, .35); color: var(--cyan); }
 .conversation-state .connection-dot { width: 5px; height: 5px; }
 .mobile-back { display: none; }
 .conversation-scope { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 11px 16px; border-bottom: 1px solid rgba(255, 255, 255, .025); color: var(--faint); font-size: 9px; }

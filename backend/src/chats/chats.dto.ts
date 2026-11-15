@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsDateString, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 export class CreateDirectChatDto {
   @ApiProperty({ format: 'uuid' })
@@ -41,6 +41,18 @@ export class SendMessageDto {
   @MinLength(1)
   @MaxLength(10000)
   text!: string;
+}
+
+export class NotificationPreferenceDto {
+  @ApiPropertyOptional({ nullable: true, format: 'date-time', description: 'UTC mute expiry; null unmutes immediately.' })
+  @IsOptional()
+  @IsDateString()
+  mutedUntil?: string | null;
+
+  @ApiPropertyOptional({ default: true })
+  @IsOptional()
+  @IsBoolean()
+  previewEnabled?: boolean;
 }
 
 export class IdempotencyHeader {

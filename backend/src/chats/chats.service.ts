@@ -6,7 +6,7 @@ import type { PoolClient } from 'pg';
 interface PublicUserRow { id: string; username: string; display_name: string }
 interface MessageRow { id: string; client_message_id: string; chat_id: string; sender_id: string; text: string; created_at: Date | string; delivered_at: Date | string | null; read_at: Date | string | null; edited_at: Date | string | null; deleted_at: Date | string | null }
 type PublicUser = { id: string; username: string; displayName: string };
-type ChatDto = { id: string; participant: PublicUser; updatedAt: string };
+export type ChatDto = { id: string; participant: PublicUser; updatedAt: string; unreadCount: number; mutedUntil: string | null };
 export type MessageDto = { id: string; clientMessageId: string; chatId: string; senderId: string; text: string; createdAt: string; deliveredAt: string | null; readAt: string | null; editedAt: string | null; deletedAt: string | null };
 
 @Injectable()
@@ -14,18 +14,23 @@ export class ChatsService {
   constructor(private readonly db: DatabaseService) {}
 
   async listChats(userId: string): Promise<ChatDto[]> {
-    const result = await this.db.query<{ id: string; peer_id: string; username: string; display_name: string; updated_at: Date | string }>(
-      `SELECT c.id, peer.id AS peer_id, peer.username, peer.display_name, c.updated_at
+    const result = await this.db.query<{ id: string; peer_id: string; username: string; display_name: string; updated_at: Date | string; unread_count: string; muted_until: Date | string | null }>(
+      `SELECT c.id, peer.id AS peer_id, peer.username, peer.display_name, c.updated_at,
+              (SELECT COUNT(*) FROM messages m
+                WHERE m.chat_id = c.id AND m.sender_id <> $1
+                  AND NOT EXISTS (SELECT 1 FROM message_receipts r WHERE r.message_id = m.id AND r.user_id = $1 AND r.read_at IS NOT NULL)) AS unread_count,
+              CASE WHEN pref.muted_until > now() THEN pref.muted_until ELSE NULL END AS muted_until
          FROM chats c
          JOIN chat_members own ON own.chat_id = c.id AND own.user_id = $1
          JOIN chat_members other ON other.chat_id = c.id AND other.user_id <> $1
          JOIN users peer ON peer.id = other.user_id
+         LEFT JOIN chat_notification_preferences pref ON pref.chat_id = c.id AND pref.user_id = $1
         ORDER BY c.updated_at DESC, c.id`, [userId],
     );
     return result.rows.map((row) => ({
       id: row.id,
       participant: { id: row.peer_id, username: row.username, displayName: row.display_name },
-      updatedAt: this.asIso(row.updated_at),
+      updatedAt: this.asIso(row.updated_at), unreadCount: Number(row.unread_count), mutedUntil: row.muted_until ? this.asIso(row.muted_until) : null,
     }));
   }
 
@@ -45,7 +50,7 @@ export class ChatsService {
       const updated = await client.query<{ updated_at: Date | string }>('SELECT updated_at FROM chats WHERE id = $1', [row.id]);
       await client.query('COMMIT');
       const participant = users.rows.find((candidate) => candidate.id === otherUserId)!;
-      return { id: row.id, participant: this.publicUser(participant), updatedAt: this.asIso(updated.rows[0].updated_at) };
+      return { id: row.id, participant: this.publicUser(participant), updatedAt: this.asIso(updated.rows[0].updated_at), unreadCount: 0, mutedUntil: null };
     } catch (error) {
       try { await client.query('ROLLBACK'); } catch { /* already closed */ }
       throw error;
@@ -75,6 +80,18 @@ export class ChatsService {
     const hasMore = result.rows.length > limit;
     const items = result.rows.slice(0, limit).map((row) => this.message(row));
     return { items, nextCursor: hasMore && items.length ? items[items.length - 1].id : null };
+  }
+
+  async updateNotificationPreference(userId: string, chatId: string, mutedUntil: string | null, previewEnabled = true): Promise<{ chatId: string; mutedUntil: string | null; previewEnabled: boolean }> {
+    if (!await this.isMember(chatId, userId)) throw new ForbiddenException('User cannot access this chat');
+    const result = await this.db.query<{ muted_until: Date | string | null; preview_enabled: boolean }>(
+      `INSERT INTO chat_notification_preferences(user_id, chat_id, muted_until, preview_enabled, updated_at)
+       VALUES ($1, $2, $3::timestamptz, $4, now())
+       ON CONFLICT (user_id, chat_id) DO UPDATE SET muted_until = EXCLUDED.muted_until, preview_enabled = EXCLUDED.preview_enabled, updated_at = now()
+       RETURNING muted_until, preview_enabled`, [userId, chatId, mutedUntil, previewEnabled],
+    );
+    const row = result.rows[0];
+    return { chatId, mutedUntil: row.muted_until ? this.asIso(row.muted_until) : null, previewEnabled: row.preview_enabled };
   }
 
   async sendMessage(userId: string, chatId: string, key: string, text: string): Promise<{ message: MessageDto; created: boolean }> {
