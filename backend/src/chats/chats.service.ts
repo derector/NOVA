@@ -4,10 +4,10 @@ import { decideIdempotency } from '../common/security.helpers';
 import type { PoolClient } from 'pg';
 
 interface PublicUserRow { id: string; username: string; display_name: string }
-interface MessageRow { id: string; client_message_id: string; chat_id: string; sender_id: string; text: string; created_at: Date | string; delivered_at: Date | string | null; read_at: Date | string | null }
+interface MessageRow { id: string; client_message_id: string; chat_id: string; sender_id: string; text: string; created_at: Date | string; delivered_at: Date | string | null; read_at: Date | string | null; edited_at: Date | string | null; deleted_at: Date | string | null }
 type PublicUser = { id: string; username: string; displayName: string };
 type ChatDto = { id: string; participant: PublicUser; updatedAt: string };
-export type MessageDto = { id: string; clientMessageId: string; chatId: string; senderId: string; text: string; createdAt: string; deliveredAt: string | null; readAt: string | null };
+export type MessageDto = { id: string; clientMessageId: string; chatId: string; senderId: string; text: string; createdAt: string; deliveredAt: string | null; readAt: string | null; editedAt: string | null; deletedAt: string | null };
 
 @Injectable()
 export class ChatsService {
@@ -62,8 +62,9 @@ export class ChatsService {
       cursorTime = cursor.rows[0].created_at;
     }
     const result = await this.db.query<MessageRow>(
-      `SELECT m.id, m.client_message_id, m.chat_id, m.sender_id, m.text, m.created_at, m.delivered_at,
-              MAX(r.read_at) AS read_at
+      `SELECT m.id, m.client_message_id, m.chat_id, m.sender_id,
+              CASE WHEN m.deleted_at IS NULL THEN m.text ELSE 'Сообщение удалено' END AS text,
+              m.created_at, m.delivered_at, MAX(r.read_at) AS read_at, m.edited_at, m.deleted_at
          FROM messages m
          LEFT JOIN message_receipts r ON r.message_id = m.id AND r.user_id <> m.sender_id
         WHERE m.chat_id = $1 AND ($2::timestamptz IS NULL OR (m.created_at, m.id) > ($2::timestamptz, $3::uuid))
@@ -85,13 +86,13 @@ export class ChatsService {
         `INSERT INTO messages(chat_id, sender_id, client_message_id, text)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (chat_id, sender_id, client_message_id) DO NOTHING
-         RETURNING id, client_message_id, chat_id, sender_id, text, created_at, delivered_at, NULL::timestamptz AS read_at`, [chatId, userId, key, text],
+         RETURNING id, client_message_id, chat_id, sender_id, text, created_at, delivered_at, NULL::timestamptz AS read_at, edited_at, deleted_at`, [chatId, userId, key, text],
       );
       let row = inserted.rows[0];
       let created = true;
       if (!row) {
         const existing = await client.query<MessageRow>(
-          `SELECT id, client_message_id, chat_id, sender_id, text, created_at, delivered_at, NULL::timestamptz AS read_at
+          `SELECT id, client_message_id, chat_id, sender_id, text, created_at, delivered_at, NULL::timestamptz AS read_at, edited_at, deleted_at
              FROM messages WHERE chat_id = $1 AND sender_id = $2 AND client_message_id = $3 FOR UPDATE`, [chatId, userId, key],
         );
         row = existing.rows[0];
@@ -104,6 +105,48 @@ export class ChatsService {
       }
       await client.query('COMMIT');
       return { message: this.message(row), created };
+    } catch (error) {
+      try { await client.query('ROLLBACK'); } catch { /* already closed */ }
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async editMessage(userId: string, chatId: string, messageId: string, text: string): Promise<MessageDto> {
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      if (!await this.isMemberWithClient(client, chatId, userId)) throw new ForbiddenException('User cannot access this chat');
+      const result = await client.query<MessageRow>(
+        `UPDATE messages SET text = $4, edited_at = now()
+          WHERE id = $1 AND chat_id = $2 AND sender_id = $3 AND deleted_at IS NULL AND created_at > now() - interval '15 minutes'
+          RETURNING id, client_message_id, chat_id, sender_id, text, created_at, delivered_at, NULL::timestamptz AS read_at, edited_at, deleted_at`,
+        [messageId, chatId, userId, text.trim()],
+      );
+      if (!result.rows[0]) throw new ConflictException('Message cannot be edited: it may be deleted, too old, or not yours');
+      await client.query('UPDATE chats SET updated_at = now() WHERE id = $1', [chatId]);
+      await client.query('COMMIT');
+      return this.message(result.rows[0]);
+    } catch (error) {
+      try { await client.query('ROLLBACK'); } catch { /* already closed */ }
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async deleteMessage(userId: string, chatId: string, messageId: string): Promise<MessageDto> {
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      if (!await this.isMemberWithClient(client, chatId, userId)) throw new ForbiddenException('User cannot access this chat');
+      const result = await client.query<MessageRow>(
+        `UPDATE messages SET deleted_at = now()
+          WHERE id = $1 AND chat_id = $2 AND sender_id = $3 AND deleted_at IS NULL
+          RETURNING id, client_message_id, chat_id, sender_id, 'Сообщение удалено' AS text, created_at, delivered_at, NULL::timestamptz AS read_at, edited_at, deleted_at`,
+        [messageId, chatId, userId],
+      );
+      if (!result.rows[0]) throw new ConflictException('Message cannot be deleted or is not yours');
+      await client.query('UPDATE chats SET updated_at = now() WHERE id = $1', [chatId]);
+      await client.query('COMMIT');
+      return this.message(result.rows[0]);
     } catch (error) {
       try { await client.query('ROLLBACK'); } catch { /* already closed */ }
       throw error;
@@ -153,6 +196,7 @@ export class ChatsService {
     return {
       id: row.id, clientMessageId: row.client_message_id, chatId: row.chat_id, senderId: row.sender_id,
       text: row.text, createdAt: this.asIso(row.created_at), deliveredAt: row.delivered_at ? this.asIso(row.delivered_at) : null, readAt: row.read_at ? this.asIso(row.read_at) : null,
+      editedAt: row.edited_at ? this.asIso(row.edited_at) : null, deletedAt: row.deleted_at ? this.asIso(row.deleted_at) : null,
     };
   }
   private asIso(value: Date | string): string { return new Date(value).toISOString(); }

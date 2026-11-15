@@ -68,6 +68,14 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.server.to(this.room(event.chatId)).emit('message:read', event);
   }
 
+  emitMessageUpdated(message: { id: string; chatId: string; text: string; editedAt: string | null }): void {
+    if (this.server) this.server.to(this.room(message.chatId)).emit('message:updated', message);
+  }
+
+  emitMessageDeleted(message: { id: string; chatId: string; text: string; deletedAt: string | null }): void {
+    if (this.server) this.server.to(this.room(message.chatId)).emit('message:deleted', message);
+  }
+
   private async isMember(chatId: string, userId: string): Promise<boolean> {
     const result = await this.db.query('SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2', [chatId, userId]);
     return (result.rowCount ?? 0) > 0;

@@ -92,6 +92,7 @@ export default function HomePage() {
   const [historyAttempt, setHistoryAttempt] = useState(0);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [mutatingMessageId, setMutatingMessageId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<NovaPublicUser[]>([]);
@@ -380,6 +381,12 @@ export default function HomePage() {
       const readAt = new Date().toISOString();
       setMessages((current) => current.map((message) => ids.has(message.id) ? { ...message, deliveredAt: message.deliveredAt || readAt, readAt } : message));
     });
+    socket.on('message:updated', (message: NovaMessage) => {
+      if (message?.chatId === selectedChatRef.current) setMessages((current) => mergeMessages(current, [message]));
+    });
+    socket.on('message:deleted', (message: NovaMessage) => {
+      if (message?.chatId === selectedChatRef.current) setMessages((current) => mergeMessages(current, [message]));
+    });
     socket.connect();
     return () => {
       socket.removeAllListeners();
@@ -586,6 +593,29 @@ export default function HomePage() {
     } finally { setSending(false); }
   }
 
+  async function editMessage(message: NovaMessage) {
+    const nextText = window.prompt('Изменить сообщение', message.text);
+    if (nextText === null || !nextText.trim() || nextText.trim() === message.text || !selectedChatId) return;
+    setMutatingMessageId(message.id);
+    try {
+      const updated = await authenticatedFetch<NovaMessage>(apiPath(`/chats/${selectedChatId}/messages/${message.id}`), { method: 'PATCH', body: JSON.stringify({ text: nextText.trim() }) });
+      setMessages((current) => mergeMessages(current, [updated]));
+      setSuccess('Сообщение изменено на сервере.');
+    } catch (error) { setNotice(`Не удалось изменить сообщение: ${getErrorMessage(error)}`); }
+    finally { setMutatingMessageId(null); }
+  }
+
+  async function deleteMessage(message: NovaMessage) {
+    if (!selectedChatId || !window.confirm('Удалить сообщение у всех участников?')) return;
+    setMutatingMessageId(message.id);
+    try {
+      const deleted = await authenticatedFetch<NovaMessage>(apiPath(`/chats/${selectedChatId}/messages/${message.id}`), { method: 'DELETE' });
+      setMessages((current) => mergeMessages(current, [deleted]));
+      setSuccess('Сообщение удалено на сервере.');
+    } catch (error) { setNotice(`Не удалось удалить сообщение: ${getErrorMessage(error)}`); }
+    finally { setMutatingMessageId(null); }
+  }
+
   const selectedChat = useMemo(() => chats.find((chat) => chat.id === selectedChatId) || null, [chats, selectedChatId]);
   const messagesLoading = selectedChatId !== null && loadingChatId === selectedChatId;
   const usernameValid = /^[A-Za-z0-9_]{3,32}$/.test(username.trim());
@@ -719,7 +749,8 @@ export default function HomePage() {
               {messages.map((message) => {
                 const outgoing = message.senderId === me?.id;
                 return <article key={message.id} className={`message-row${outgoing ? ' message-outgoing' : ''}`}>
-                  <div className="message-bubble"><p>{message.text}</p><div className="message-meta"><time dateTime={message.createdAt}>{humanDate(message.createdAt)}</time>{outgoing && <span title={message.readAt ? 'Прочитано' : message.deliveredAt ? 'Доставлено' : 'Сохранено сервером'}>{message.readAt ? '✓✓ Прочитано' : message.deliveredAt ? '✓ Доставлено' : '✓ Сохранено'}</span>}</div></div>
+                  <div className="message-bubble"><p>{message.text}</p><div className="message-meta"><time dateTime={message.createdAt}>{humanDate(message.createdAt)}</time>{message.editedAt && !message.deletedAt && <span>изменено</span>}{outgoing && <span title={message.readAt ? 'Прочитано' : message.deliveredAt ? 'Доставлено' : 'Сохранено сервером'}>{message.readAt ? '✓✓ Прочитано' : message.deliveredAt ? '✓ Доставлено' : '✓ Сохранено'}</span>}</div></div>
+                  {outgoing && !message.deletedAt && <div className="message-actions"><button type="button" onClick={() => void editMessage(message)} disabled={mutatingMessageId === message.id}>Изменить</button><button type="button" onClick={() => void deleteMessage(message)} disabled={mutatingMessageId === message.id}>Удалить</button></div>}
                 </article>;
               })}
             </>}

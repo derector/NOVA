@@ -14,6 +14,12 @@ export class ChatIdParam {
   chatId!: string;
 }
 
+export class MessageIdParam extends ChatIdParam {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  messageId!: string;
+}
+
 export class ListMessagesQuery {
   @ApiPropertyOptional({ format: 'uuid' })
   @IsOptional()

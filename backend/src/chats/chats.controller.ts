@@ -1,10 +1,10 @@
-import { BadRequestException, Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Headers, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiHeader, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { isUUID } from 'class-validator';
 import { AuthenticatedRequest, JwtAuthGuard } from '../auth/auth.guard';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { ChatsService } from './chats.service';
-import { ChatIdParam, CreateDirectChatDto, ListMessagesQuery, SendMessageDto } from './chats.dto';
+import { ChatIdParam, CreateDirectChatDto, ListMessagesQuery, MessageIdParam, SendMessageDto } from './chats.dto';
 
 const publicUserSchema = {
   type: 'object' as const,
@@ -28,6 +28,7 @@ const messageSchema = {
     chatId: { type: 'string', format: 'uuid' }, senderId: { type: 'string', format: 'uuid' },
     text: { type: 'string' }, createdAt: { type: 'string', format: 'date-time' },
     deliveredAt: { type: 'string', format: 'date-time', nullable: true }, readAt: { type: 'string', format: 'date-time', nullable: true },
+    editedAt: { type: 'string', format: 'date-time', nullable: true }, deletedAt: { type: 'string', format: 'date-time', nullable: true },
   },
 };
 
@@ -69,6 +70,22 @@ export class ChatsController {
     const messageIds = await this.chats.markRead(req.auth!.userId, params.chatId);
     this.realtime.emitRead({ chatId: params.chatId, userId: req.auth!.userId, messageIds });
     return { chatId: params.chatId, messageIds };
+  }
+
+  @Patch(':chatId/messages/:messageId')
+  @HttpCode(HttpStatus.OK)
+  async edit(@Req() req: AuthenticatedRequest, @Param() params: MessageIdParam, @Body() body: SendMessageDto) {
+    const message = await this.chats.editMessage(req.auth!.userId, params.chatId, params.messageId, body.text);
+    this.realtime.emitMessageUpdated(message);
+    return message;
+  }
+
+  @Delete(':chatId/messages/:messageId')
+  @HttpCode(HttpStatus.OK)
+  async remove(@Req() req: AuthenticatedRequest, @Param() params: MessageIdParam) {
+    const message = await this.chats.deleteMessage(req.auth!.userId, params.chatId, params.messageId);
+    this.realtime.emitMessageDeleted(message);
+    return message;
   }
 
   @Post(':chatId/messages')
