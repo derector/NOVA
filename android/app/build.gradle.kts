@@ -14,6 +14,15 @@ val releaseStoreFile = providers.environmentVariable("NOVA_RELEASE_STORE_FILE").
 val releaseStorePassword = providers.environmentVariable("NOVA_RELEASE_STORE_PASSWORD").orNull
 val releaseKeyAlias = providers.environmentVariable("NOVA_RELEASE_KEY_ALIAS").orNull
 val releaseKeyPassword = providers.environmentVariable("NOVA_RELEASE_KEY_PASSWORD").orNull
+val debugStoreFile = providers.environmentVariable("NOVA_DEBUG_KEYSTORE_FILE").orNull
+val debugStorePassword = providers.environmentVariable("NOVA_DEBUG_STORE_PASSWORD").orNull
+val debugKeyAlias = providers.environmentVariable("NOVA_DEBUG_KEY_ALIAS").orNull
+val debugKeyPassword = providers.environmentVariable("NOVA_DEBUG_KEY_PASSWORD").orNull
+val stableDebugSigningValues = listOf(debugStoreFile, debugStorePassword, debugKeyAlias, debugKeyPassword)
+val stableDebugSigningConfigured = stableDebugSigningValues.all { !it.isNullOrBlank() }
+if (stableDebugSigningValues.any { !it.isNullOrBlank() } && !stableDebugSigningConfigured) {
+    throw GradleException("Stable debug signing requires NOVA_DEBUG_KEYSTORE_FILE and all NOVA_DEBUG_* password/alias variables.")
+}
 
 android {
     namespace = "io.nova.app"
@@ -23,8 +32,8 @@ android {
         applicationId = "io.nova.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.1.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "API_BASE_URL", "\"$debugApiBase\"")
     }
@@ -36,12 +45,22 @@ android {
             releaseKeyAlias?.let { keyAlias = it }
             releaseKeyPassword?.let { keyPassword = it }
         }
+        if (stableDebugSigningConfigured) {
+            create("stableDebug") {
+                storeFile = File(debugStoreFile!!)
+                storeType = "JKS"
+                storePassword = debugStorePassword!!
+                keyAlias = debugKeyAlias!!
+                keyPassword = debugKeyPassword!!
+            }
+        }
     }
 
     buildTypes {
         debug {
             isDebuggable = true
             manifestPlaceholders["allowCleartext"] = "true"
+            if (stableDebugSigningConfigured) signingConfig = signingConfigs.getByName("stableDebug")
         }
         release {
             isMinifyEnabled = false

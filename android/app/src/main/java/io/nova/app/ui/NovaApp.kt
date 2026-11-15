@@ -2,8 +2,10 @@ package io.nova.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,14 +13,17 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -39,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -95,49 +101,131 @@ fun NovaApp(viewModel: MainViewModel = viewModel()) {
 @Composable
 private fun AuthScreen(state: MainUiState, viewModel: MainViewModel) {
     var code by remember { mutableStateOf("") }
-    Column(
-        Modifier.fillMaxSize().background(Night).imePadding().padding(horizontal = 26.dp),
-        verticalArrangement = Arrangement.Center,
-    ) {
-        BrandMark()
-        Spacer(Modifier.height(32.dp))
-        Text(if (state.codeRequested) "Проверьте почту" else "Ваши разговоры. Без лишнего.", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(8.dp))
-        Text(if (state.codeRequested) "Введите одноразовый код из письма." else "Войдите по email-коду — без пароля.", color = Muted)
-        Spacer(Modifier.height(26.dp))
-        OutlinedTextField(
-            value = state.email,
-            onValueChange = viewModel::setEmail,
-            label = { Text("Email") },
-            enabled = !state.busy,
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        if (state.codeRequested) {
-            Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
-                value = code,
-                onValueChange = { if (it.length <= 12) code = it.filter(Char::isDigit) },
-                label = { Text("Одноразовый код") },
-                enabled = !state.busy,
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                modifier = Modifier.fillMaxWidth(),
+    val focusManager = LocalFocusManager.current
+    val emailValid = AuthValidation.isEmailValid(state.email)
+    val emailError = state.email.isNotBlank() && !emailValid
+    val codeValid = code.length in 6..12 && code.all(Char::isDigit)
+
+    BoxWithConstraints(Modifier.fillMaxSize().background(Night).imePadding()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = maxHeight)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 26.dp, vertical = 24.dp),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            BrandMark()
+            Spacer(Modifier.height(30.dp))
+            Text(
+                if (state.codeRequested) "Проверьте почту" else "Вход в NOVA",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(8.dp))
-            TextButton(onClick = viewModel::requestCode, enabled = !state.busy) { Text("Запросить код ещё раз") }
+            Text(
+                if (state.codeRequested) "Введите одноразовый код из письма." else "Укажите email — отправим код для входа. Пароль не нужен.",
+                color = Muted,
+            )
+            Spacer(Modifier.height(24.dp))
+
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Panel,
+                shape = RoundedCornerShape(24.dp),
+            ) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(if (state.codeRequested) "Адрес для входа" else "Ваша почта", style = MaterialTheme.typography.titleSmall, color = Muted)
+                    OutlinedTextField(
+                        value = state.email,
+                        onValueChange = viewModel::setEmail,
+                        label = { Text("Email") },
+                        placeholder = { Text("name@example.com") },
+                        leadingIcon = { Text("@", color = Muted, style = MaterialTheme.typography.titleMedium) },
+                        trailingIcon = if (!state.codeRequested && state.email.isNotBlank()) {
+                            { TextButton(onClick = { viewModel.setEmail("") }) { Text("Очистить") } }
+                        } else {
+                            null
+                        },
+                        supportingText = {
+                            Text(
+                                if (emailError) "Проверьте адрес, например name@example.com."
+                                else "На этот адрес придёт одноразовый код.",
+                            )
+                        },
+                        isError = emailError,
+                        enabled = !state.busy && !state.codeRequested,
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Email,
+                            imeAction = ImeAction.Done,
+                            autoCorrectEnabled = false,
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                focusManager.clearFocus()
+                                if (emailValid && !state.codeRequested) viewModel.requestCode()
+                            },
+                        ),
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    if (state.codeRequested) {
+                        Spacer(Modifier.height(4.dp))
+                        OutlinedTextField(
+                            value = code,
+                            onValueChange = { input ->
+                                if (input.length <= 12 && input.all(Char::isDigit)) code = input
+                            },
+                            label = { Text("Одноразовый код") },
+                            placeholder = { Text("Введите код из письма") },
+                            supportingText = { Text("Введите цифры из письма NOVA.") },
+                            enabled = !state.busy,
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.NumberPassword,
+                                imeAction = ImeAction.Done,
+                            ),
+                            keyboardActions = KeyboardActions(
+                                onDone = {
+                                    focusManager.clearFocus()
+                                    if (codeValid) viewModel.verify(code)
+                                },
+                            ),
+                            shape = RoundedCornerShape(18.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = {
+                    focusManager.clearFocus()
+                    if (state.codeRequested) viewModel.verify(code) else viewModel.requestCode()
+                },
+                enabled = !state.busy && if (state.codeRequested) codeValid else emailValid,
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+            ) {
+                if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                else Text(if (state.codeRequested) "Подтвердить" else "Отправить код")
+            }
+
+            if (state.codeRequested) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    TextButton(onClick = { code = ""; viewModel.editEmail() }, enabled = !state.busy) {
+                        Text("Изменить email")
+                    }
+                    TextButton(onClick = viewModel::requestCode, enabled = !state.busy && emailValid) {
+                        Text("Отправить ещё раз")
+                    }
+                }
+            }
+            Notice(state.notice)
         }
-        Spacer(Modifier.height(16.dp))
-        Button(
-            onClick = { if (state.codeRequested) viewModel.verify(code) else viewModel.requestCode() },
-            enabled = !state.busy,
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-        ) {
-            if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-            else Text(if (state.codeRequested) "Подтвердить email" else "Получить код")
-        }
-        Notice(state.notice)
     }
 }
 
@@ -335,7 +423,15 @@ private fun BrandMark(modifier: Modifier = Modifier) {
 @Composable
 private fun Notice(text: String?) {
     if (!text.isNullOrBlank()) {
-        Text(text, color = if (text.startsWith("Нет соединения")) Color(0xFFFFD18A) else Accent, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 10.dp))
+        val isError = text.startsWith("Не удалось") || text.startsWith("Сервер") || text.startsWith("Слишком") || text.startsWith("Введите")
+        val textColor = if (isError) Color(0xFFFFC4BA) else Accent
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+            color = if (isError) Color(0xFF302328) else Color(0xFF18352F),
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            Text(text, color = textColor, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp))
+        }
     }
 }
 

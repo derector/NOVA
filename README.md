@@ -1,25 +1,29 @@
 # NOVA
 
-NOVA — коммуникационный продукт. Сейчас реализован первый вертикальный срез: нативное Android-приложение, NestJS/PostgreSQL API и отдельный небольшой web-клиент для сценария двух пользователей и текстового сообщения. Android-клиент — APK, не WebView.
+NOVA — коммуникационный продукт. Текущий MVP-срез состоит из нативного Android APK, NestJS/PostgreSQL API и отдельного Next.js web-клиента для сценария двух пользователей и текстового сообщения. Android-приложение — APK, а не WebView.
 
-## Структура проекта
+## Структура
 
-- `android/` — Kotlin + Jetpack Compose (`applicationId=io.nova.app`, `minSdk=26`), включая adaptive/round launcher icons.
-- `backend/` — NestJS API, PostgreSQL migrations, REST и Socket.IO.
-- `web/` — отдельный клиент Next.js/React/TypeScript.
-- `shared/` — OpenAPI-контракт и описание realtime-событий.
-- `AGENTS.md` — постоянные instructions для безопасной разработки NOVA UI на Android и web.
-- `docs/` — архитектура, запуск/release, открытые источники и их лицензии.
-- `.github/workflows/ci.yml` — GitHub Actions для backend, web, Android debug APK и защищённой release-сборки.
+- `android/` — Kotlin + Jetpack Compose, package `io.nova.app`, собственная adaptive/round иконка, локальная очередь сообщений и экран email/OTP.
+- `backend/` — NestJS API, PostgreSQL migrations, REST и Socket.IO; отправка кода через SMTP/Nodemailer.
+- `web/` — отдельный Next.js/React/TypeScript клиент.
+- `shared/` — OpenAPI и realtime-контракты.
+- `AGENTS.md` — проектные дизайн- и UI/accessibility правила, собранные из проверенных открытых руководств.
+- `docs/` — архитектура, сборка, GitHub design-source review и диагностика входа/Brevo.
+- `.github/workflows/ci.yml` — GitHub Actions для backend, web, native APK, unit tests и защищённого release.
 
-## Текущий статус
+## Статус handoff
 
-Android APK обновлён до версии `0.1.1` (`versionCode=2`). В манифест добавлена собственная adaptive и round launcher icon NOVA — мятный фон и тёмная буква N. Локальная сборка, AAPT icon metadata и `apksigner` прошли проверку; commit с иконкой прошёл полный [GitHub Actions run 43705547258](https://github.com/derector/NOVA/actions/runs/43705547258), включая backend/PostgreSQL migration и health smoke, web checks, Android APK и unit tests. Release job пропускается на обычном push и требует отдельной production-подписи.
+В локальном дереве приложения — версия `0.1.2` (`versionCode=3`): добавлена фирменная иконка, улучшена форма email/OTP, локальная проверка email и клавиатурное действие, а ошибка недоступного API сообщает, что `10.0.2.2` подходит Android Emulator, но не физическому телефону. Нативная сборка проверена локально; Android unit tests — 8/8.
 
-Выданный APK — debug/test build, подписанный debug-сертификатом, не production release. Email-вход на телефоне **не заработает**, пока к приложению не подключён публично доступный backend и не настроен настоящий SMTP-провайдер. В текущем debug APK `http://10.0.2.2:3001` работает только для Android Emulator с backend на машине-разработчике. Web-клиент есть в исходниках, но публичный сайт пока не развёрнут.
+Последний зелёный GitHub Actions run [43706740260](https://github.com/derector/NOVA/actions/runs/43706740260) проверял публичный `main` на commit `9dde025`; release job штатно пропущен. Исправления login/Brevo/stable signing после этой ревизии пока находятся в локальном дереве и handoff-архиве, не в публичном `main`. Для stable debug подписи уже настроена Gradle/CI поддержка; добавление Actions secrets сейчас блокируется ответом GitHub API `403`.
 
-## Разработка и проверки
+**Вход с физического телефона пока не может завершиться:** публичный backend не развёрнут, а debug URL `http://10.0.2.2:3001` указывает на host Android Emulator. Brevo можно использовать без нового SDK: backend уже использует Nodemailer, но нужны SMTP key, подтверждённый sender/домен, PostgreSQL и API по публичному HTTPS. Не вводите SMTP key в APK, этот README или чат.
 
-Перед UI-изменениями используйте [инструкции проекта](AGENTS.md). В них адаптированы безопасные практики для Android и Next.js из пяти проверенных GitHub-источников. Обзор репозиториев, лицензий, применимости и ограничений: [design skills review](docs/design-skills-review.md). История архитектурных решений и границы реализации: [TODO.md](TODO.md) и [architecture.md](docs/architecture.md). Команды запуска и сборки: [build-and-deploy.md](docs/build-and-deploy.md).
+Для перехода с предыдущего APK v0.1.1 потребуется согласованное одноразовое удаление старой debug-версии; оно удалит локальные данные приложения. Следующий APK и последующие обновления должны быть собраны с одним и тем же постоянным debug-keystore. APK ещё не проверен установкой на реальный Android device.
 
-Не добавляйте в репозиторий SMTP credentials, `APP_SECRET`, production database URL, ключи Firebase/object storage или Android release keystore. Email — приватные данные аккаунта: публичный поиск и участники чатов получают только ID, username и display name.
+## Передача следующему разработчику
+
+Начните с [handoff guide](docs/HANDOFF_RU.md), затем прочитайте [AGENTS.md](AGENTS.md), [TODO.md](TODO.md), [сборку/установку](docs/build-and-deploy.md) и [диагностику сети, формы и Brevo](docs/login-network-research.md). Сводка открытых дизайн-репозиториев находится в [design-skills-review.md](docs/design-skills-review.md).
+
+Публичный репозиторий: [github.com/derector/NOVA](https://github.com/derector/NOVA). Не коммитьте `.env`, SMTP credentials, keystore, base64-ключи или production database URL; `.gitignore` исключает локальные секреты и build outputs.

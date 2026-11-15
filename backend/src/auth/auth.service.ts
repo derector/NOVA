@@ -43,6 +43,7 @@ export class AuthService {
         host,
         port,
         secure: process.env.SMTP_SECURE === 'true',
+        requireTLS: port === 587 || port === 2525,
         auth: process.env.SMTP_USER && process.env.SMTP_PASSWORD
           ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD }
           : undefined,
@@ -53,8 +54,8 @@ export class AuthService {
       await this.mailer.sendMail({
         from,
         to: email,
-        subject: 'Your NOVA sign-in code',
-        text: `Your NOVA sign-in code is ${code}. It expires in ${ttlMinutes} minutes. If you did not request this code, you can ignore this message.`,
+        subject: 'Код входа в NOVA',
+        text: `Ваш код для входа в NOVA: ${code}. Он действует ${ttlMinutes} мин. Если вы не запрашивали код, просто проигнорируйте это письмо.`,
       });
     } catch {
       await this.db.query('UPDATE otp_challenges SET consumed_at = now() WHERE email = $1 AND code_hash = $2', [email, digest]);

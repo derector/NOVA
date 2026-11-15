@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
+import io.nova.app.BuildConfig
 import io.nova.app.NovaApplication
 import io.nova.app.data.local.ChatEntity
 import io.nova.app.data.remote.ApiFailure
@@ -65,12 +66,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setEmail(value: String) { mutableState.value = mutableState.value.copy(email = value, notice = null) }
+    fun editEmail() { mutableState.value = mutableState.value.copy(codeRequested = false, notice = null) }
     fun setCodeRequested(value: Boolean) { mutableState.value = mutableState.value.copy(codeRequested = value) }
     fun setSearchQuery(value: String) { mutableState.value = mutableState.value.copy(profileSearchQuery = value) }
 
     fun requestCode() = perform {
-        val email = mutableState.value.email.trim()
-        require(email.contains('@') && email.length <= 320) { "Введите корректный email" }
+        val email = AuthValidation.normalizedEmail(mutableState.value.email)
+        require(AuthValidation.isEmailValid(email)) { "Введите корректный email" }
         repository.requestCode(email)
         mutableState.value = mutableState.value.copy(codeRequested = true, notice = "Если адрес доступен, письмо с кодом отправлено.")
     }
@@ -166,8 +168,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             error.code == 401 -> "Сессия истекла. Выйдите и войдите снова."
             error.code == 409 -> "Username занят или ключ сообщения конфликтует с другим текстом."
             error.code == 429 -> "Слишком много запросов. Подождите и попробуйте снова."
-            error.code == 503 -> "Email-доставка временно недоступна."
-            error.retryable -> "Нет соединения с сервером. Данные сохранены локально; попробуйте ещё раз."
+            error.code == 503 -> "Сервер ответил, но не смог выполнить запрос. Проверьте настройку отправки email и попробуйте позже; письмо не отправлено."
+            error.code == 408 -> "Сервер не ответил вовремя. Проверьте подключение и попробуйте ещё раз."
+            error.code == null && error.retryable -> AuthNetworkMessages.connectionFailure(BuildConfig.API_BASE_URL, BuildConfig.DEBUG)
+            error.retryable -> "Сервер временно недоступен (HTTP ${error.code}). Попробуйте позже."
             else -> error.message
         }
         else -> error.message ?: "Не удалось выполнить действие. Проверьте соединение и повторите."

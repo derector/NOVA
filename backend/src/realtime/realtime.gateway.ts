@@ -16,13 +16,24 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   constructor(private readonly auth: AuthService, private readonly db: DatabaseService) {}
 
-  async handleConnection(client: Socket): Promise<void> {
-    const token = client.handshake.auth?.token;
-    const identity = typeof token === 'string' ? await this.auth.authenticate(token) : null;
-    if (!identity) { client.disconnect(true); return; }
-    client.data.userId = identity.userId;
-    client.data.sessionId = identity.sessionId;
+  afterInit(server: Server): void {
+    // Authenticate before the connection is accepted so a client that emits
+    // chat:join immediately after connect cannot race the async token check.
+    server.use(async (client, next) => {
+      try {
+        const token = client.handshake.auth?.token;
+        const identity = typeof token === 'string' ? await this.auth.authenticate(token) : null;
+        if (!identity) return next(new Error('unauthorized'));
+        client.data.userId = identity.userId;
+        client.data.sessionId = identity.sessionId;
+        next();
+      } catch {
+        next(new Error('unauthorized'));
+      }
+    });
   }
+
+  handleConnection(_client: Socket): void { /* identity is set by the auth middleware in afterInit. */ }
 
   handleDisconnect(_client: Socket): void { /* Socket.IO removes the connection from rooms. */ }
 
