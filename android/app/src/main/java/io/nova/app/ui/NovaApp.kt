@@ -45,6 +45,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -309,12 +312,12 @@ private fun ChatScreen(state: MainUiState, chat: ChatEntity?, viewModel: MainVie
             Modifier.fillMaxWidth().background(Panel).padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = { viewModel.selectChat(null) }) { Text("‹") }
+            TextButton(onClick = { viewModel.selectChat(null) }, modifier = Modifier.semantics { contentDescription = "Назад к списку диалогов" }) { Text("‹") }
             Column(Modifier.weight(1f)) {
                 Text(chat?.participantDisplayName?.ifBlank { "Диалог" } ?: "Диалог", fontWeight = FontWeight.SemiBold)
                 Text(chat?.let { "@${it.participantUsername}" } ?: "Подключаемся…", color = Muted, style = MaterialTheme.typography.labelSmall)
             }
-            TextButton(onClick = { viewModel.selectChat(chatId) }) { Text("↻") }
+            TextButton(onClick = { viewModel.selectChat(chatId) }, modifier = Modifier.semantics { contentDescription = "Обновить диалог" }) { Text("↻") }
         }
         Notice(state.notice)
         if (messages.isEmpty()) {
@@ -341,7 +344,7 @@ private fun ChatScreen(state: MainUiState, chat: ChatEntity?, viewModel: MainVie
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(8.dp))
-            Button(onClick = { viewModel.send(chatId, draft); draft = "" }, enabled = draft.isNotBlank() && !state.busy) {
+            Button(onClick = { viewModel.send(chatId, draft); draft = "" }, enabled = draft.isNotBlank() && !state.busy, modifier = Modifier.semantics { contentDescription = "Отправить сообщение" }) {
                 Text("➤")
             }
         }
@@ -351,7 +354,7 @@ private fun ChatScreen(state: MainUiState, chat: ChatEntity?, viewModel: MainVie
 @Composable
 private fun ChatRow(chat: ChatEntity, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(16.dp)).clickable(onClick = onClick).padding(16.dp),
+        Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(16.dp)).clickable(role = Role.Button, onClick = onClick).padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(42.dp).background(Color(0xFF263B48), CircleShape), contentAlignment = Alignment.Center) {
