@@ -34,7 +34,7 @@ REST API личных чатов работает с PostgreSQL и провер�
 
 ## 5. HTTPS, secrets, GitHub remote и CI — IN DEVELOPMENT
 
-Исходники опубликованы в публичном [`derector/NOVA`](https://github.com/derector/NOVA), ветка `main`, commit `e2899bf`. GitHub Actions workflow настроен и закрепляет Actions по SHA; в него входят backend/PostgreSQL checks, web build, Android debug artifact и release job по тегу. Первый hosted run нашёл expression error до выполнения jobs (`runner.temp` в job-level environment). Исправление подготовлено локально через `$RUNNER_TEMP` и `GITHUB_ENV`; commit/push и повторный результат CI ещё ожидаются.
+Исходники опубликованы в публичном [`derector/NOVA`](https://github.com/derector/NOVA), ветка `main`; GitHub Actions workflow закрепляет Actions по SHA. Backend/PostgreSQL checks и web build успешно прошли hosted CI. Android setup job остановился на устаревшем SDK package `tools`; workflow изменён так, чтобы устанавливался только `platform-tools`, а platform/build-tools устанавливались отдельной следующей командой. Этот fix и повторный CI run ещё ожидаются.
 
 Backend нужно развернуть за публичным HTTPS/WSS; PostgreSQL должен надёжно сохранять данные. Публичный deployment target, SMTP provider и production PostgreSQL не настроены. OpenAPI privacy contracts проверены локально.
 

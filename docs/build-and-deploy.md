@@ -31,7 +31,7 @@ Android: из `android/` выполните `./gradlew :app:assembleDebug :app:t
 - Android debug APK и JVM unit tests, с загрузкой APK как artifact;
 - отдельный release job по version tag, защищённый GitHub Environment.
 
-Workflow опубликован в [GitHub-репозитории NOVA](https://github.com/derector/NOVA). Первый run завершился до запуска jobs из-за недопустимого `runner.temp` expression в job-level `env`; исправление локально подготовлено через `$RUNNER_TEMP` и запись пути в `$GITHUB_ENV`. Результат повторного CI появится после отправки исправленного commit.
+Workflow опубликован в [GitHub-репозитории NOVA](https://github.com/derector/NOVA). После устранения ошибки workflow parser backend/PostgreSQL и web jobs прошли; Android job завершился на `setup-android`, который пытался установить устаревший пакет `tools`. Исправление ограничивает список пакетов до `platform-tools`; повторный hosted CI ожидается после отправки commit с этим fix.
 
 ## Подписанный release APK
 
