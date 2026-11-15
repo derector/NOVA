@@ -1,0 +1,15 @@
+#!/bin/sh
+
+APP_HOME=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+JAR="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
+if [ ! -f "$JAR" ]; then
+  echo "Missing $JAR. Restore the Gradle Wrapper JAR for Gradle 8.9." >&2
+  exit 1
+fi
+
+if [ -n "$JAVA_HOME" ]; then
+  JAVACMD="$JAVA_HOME/bin/java"
+else
+  JAVACMD=java
+fi
+exec "$JAVACMD" -classpath "$JAR" org.gradle.wrapper.GradleWrapperMain "$@"

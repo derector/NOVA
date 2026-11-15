@@ -1,0 +1,3 @@
+-keepattributes Signature
+-keep class io.nova.app.data.remote.dto.** { *; }
+-keep class io.socket.** { *; }
