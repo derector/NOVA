@@ -32,11 +32,11 @@ REST API личных чатов работает с PostgreSQL и провер�
 
 После финальных изменений успешно прошли web lint, TypeScript check, production build и npm dependency audit (0 findings).
 
-## 5. HTTPS, secrets, GitHub remote и CI — BLOCKED
+## 5. HTTPS, secrets, GitHub remote и CI — IN DEVELOPMENT
 
-Backend нужно развернуть за публичным HTTPS/WSS; PostgreSQL должен сохранять данные вне памяти/временных файлов процесса. Файл `.github/workflows/ci.yml` подготовлен локально, Actions закреплены по SHA; настроены backend/PostgreSQL checks, web build, Android debug artifact и release job по тегу. YAML workflow/OpenAPI парсятся; локально проверены response/privacy contracts.
+Исходники опубликованы в публичном [`derector/NOVA`](https://github.com/derector/NOVA), ветка `main`, commit `e2899bf`. GitHub Actions workflow настроен и закрепляет Actions по SHA; в него входят backend/PostgreSQL checks, web build, Android debug artifact и release job по тегу. Первый hosted run нашёл expression error до выполнения jobs (`runner.temp` в job-level environment). Исправление подготовлено локально через `$RUNNER_TEMP` и `GITHUB_ENV`; commit/push и повторный результат CI ещё ожидаются.
 
-GitHub аккаунт авторизован, но активный token не может создать репозиторий; `derector/NOVA` отсутствует. Push и hosted CI run не выполнялись. Публичный deployment target, SMTP provider и production PostgreSQL не настроены.
+Backend нужно развернуть за публичным HTTPS/WSS; PostgreSQL должен надёжно сохранять данные. Публичный deployment target, SMTP provider и production PostgreSQL не настроены. OpenAPI privacy contracts проверены локально.
 
 Release job потребует GitHub Environment `release`, публичную HTTPS GitHub Variable `NOVA_API_BASE_URL` и secrets `NOVA_RELEASE_KEY_BASE64`, `NOVA_RELEASE_STORE_PASSWORD`, `NOVA_RELEASE_KEY_ALIAS`, `NOVA_RELEASE_KEY_PASSWORD`. Выданный debug APK не является production release и настроен на Android Emulator API `http://10.0.2.2:3001`.
 

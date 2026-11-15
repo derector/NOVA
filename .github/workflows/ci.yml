@@ -143,7 +143,6 @@ jobs:
     env:
       NOVA_API_BASE_URL: ${{ vars.NOVA_API_BASE_URL }}
       NOVA_RELEASE_KEY_BASE64: ${{ secrets.NOVA_RELEASE_KEY_BASE64 }}
-      NOVA_RELEASE_STORE_FILE: ${{ runner.temp }}/nova-release.jks
       NOVA_RELEASE_STORE_PASSWORD: ${{ secrets.NOVA_RELEASE_STORE_PASSWORD }}
       NOVA_RELEASE_KEY_ALIAS: ${{ secrets.NOVA_RELEASE_KEY_ALIAS }}
       NOVA_RELEASE_KEY_PASSWORD: ${{ secrets.NOVA_RELEASE_KEY_PASSWORD }}
@@ -163,6 +162,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          NOVA_RELEASE_STORE_FILE="$RUNNER_TEMP/nova-release.jks"
+          printf 'NOVA_RELEASE_STORE_FILE=%s\n' "$NOVA_RELEASE_STORE_FILE" >> "$GITHUB_ENV"
           test -n "$NOVA_RELEASE_KEY_BASE64" || { echo 'Missing release environment secret NOVA_RELEASE_KEY_BASE64'; exit 1; }
           test -n "$NOVA_RELEASE_STORE_PASSWORD" || { echo 'Missing release environment secret NOVA_RELEASE_STORE_PASSWORD'; exit 1; }
           test -n "$NOVA_RELEASE_KEY_ALIAS" || { echo 'Missing release environment secret NOVA_RELEASE_KEY_ALIAS'; exit 1; }

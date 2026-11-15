@@ -31,7 +31,7 @@ Android: из `android/` выполните `./gradlew :app:assembleDebug :app:t
 - Android debug APK и JVM unit tests, с загрузкой APK как artifact;
 - отдельный release job по version tag, защищённый GitHub Environment.
 
-Workflow хранится в локальном дереве, но не запускался на GitHub: активный GitHub token не имеет разрешения создать новый репозиторий.
+Workflow опубликован в [GitHub-репозитории NOVA](https://github.com/derector/NOVA). Первый run завершился до запуска jobs из-за недопустимого `runner.temp` expression в job-level `env`; исправление локально подготовлено через `$RUNNER_TEMP` и запись пути в `$GITHUB_ENV`. Результат повторного CI появится после отправки исправленного commit.
 
 ## Подписанный release APK
 
