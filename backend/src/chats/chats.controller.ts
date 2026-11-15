@@ -27,7 +27,7 @@ const messageSchema = {
     id: { type: 'string', format: 'uuid' }, clientMessageId: { type: 'string', format: 'uuid' },
     chatId: { type: 'string', format: 'uuid' }, senderId: { type: 'string', format: 'uuid' },
     text: { type: 'string' }, createdAt: { type: 'string', format: 'date-time' },
-    deliveredAt: { type: 'string', format: 'date-time', nullable: true },
+    deliveredAt: { type: 'string', format: 'date-time', nullable: true }, readAt: { type: 'string', format: 'date-time', nullable: true },
   },
 };
 
@@ -61,6 +61,14 @@ export class ChatsController {
   @ApiResponse({ status: 403, description: 'User cannot access this chat.' })
   messages(@Req() req: AuthenticatedRequest, @Param() params: ChatIdParam, @Query() query: ListMessagesQuery) {
     return this.chats.listMessages(req.auth!.userId, params.chatId, query.after, query.limit);
+  }
+
+  @Post(':chatId/read')
+  @HttpCode(HttpStatus.OK)
+  async markRead(@Req() req: AuthenticatedRequest, @Param() params: ChatIdParam) {
+    const messageIds = await this.chats.markRead(req.auth!.userId, params.chatId);
+    this.realtime.emitRead({ chatId: params.chatId, userId: req.auth!.userId, messageIds });
+    return { chatId: params.chatId, messageIds };
   }
 
   @Post(':chatId/messages')

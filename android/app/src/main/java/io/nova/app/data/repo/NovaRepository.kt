@@ -93,8 +93,14 @@ class NovaRepository internal constructor(
         }
     }
 
+    suspend fun markRead(chatId: String) { authorized { api.markRead(it, chatId) } }
+
     suspend fun acceptSocketMessage(message: MessageDto) {
         upsertServerMessage(message, fromSocket = true)
+    }
+
+    suspend fun acceptReadReceipt(messageIds: List<String>) {
+        if (messageIds.isNotEmpty()) dao.markRead(messageIds, Instant.now().toString())
     }
 
     suspend fun sendMessage(chatId: String, rawText: String): String {
@@ -104,7 +110,7 @@ class NovaRepository internal constructor(
         val now = Instant.now().toString()
         db.withTransaction {
             dao.enqueue(
-                MessageEntity(id, null, id, chatId, session.userId, text, now, null, "PENDING"),
+                MessageEntity(id, null, id, chatId, session.userId, text, now, null, null, "PENDING"),
                 io.nova.app.data.local.OutboxEntity(id, chatId, text, now),
             )
         }
@@ -183,13 +189,14 @@ class NovaRepository internal constructor(
             text = dto.text,
             createdAt = dto.createdAt,
             deliveredAt = dto.deliveredAt,
+            readAt = dto.readAt,
             status = if (isLocalOwnPending) "PENDING" else "SENT",
         ))
         if (!fromSocket) dao.updateCursor(dto.chatId, dto.id)
     }
 
     private suspend fun confirmAck(dto: MessageDto) {
-        dao.confirmMessage(dto.clientMessageId, dto.id, dto.createdAt, dto.deliveredAt)
+        dao.confirmMessage(dto.clientMessageId, dto.id, dto.createdAt, dto.deliveredAt, dto.readAt)
         dao.deleteOutbox(dto.clientMessageId)
     }
 

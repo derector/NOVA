@@ -1,5 +1,5 @@
 import { BadRequestException, HttpException, HttpStatus, Injectable, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, createPublicKey, randomBytes, randomUUID, verify as verifySignature } from 'node:crypto';
 import * as jwt from 'jsonwebtoken';
 import nodemailer, { Transporter } from 'nodemailer';
 import { DatabaseService } from '../database/database.module';
@@ -7,8 +7,10 @@ import { generateOtp, hashSecret, secretMatches } from '../common/security.helpe
 import type { TokenResponse, UserResponse } from './auth.dto';
 import type { PoolClient } from 'pg';
 
-interface UserRow { id: string; email: string; username: string; display_name: string }
+interface UserRow { id: string; email: string; username: string; display_name: string; telegram_subject?: string | null; telegram_username?: string | null; telegram_picture?: string | null }
 interface SessionClaims { sub?: string; sid?: string }
+interface TelegramState extends jwt.JwtPayload { verifier: string; nonce: string; redirectUri: string; type: 'telegram_oidc' }
+interface TelegramClaims { iss: string; aud: string | string[]; sub: string; exp: number; nonce?: string; id?: number; name?: string; preferred_username?: string; picture?: string }
 
 @Injectable()
 export class AuthService {
@@ -132,6 +134,83 @@ export class AuthService {
     await this.db.query('UPDATE sessions SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL', [sessionId]);
   }
 
+  telegramStart(): { url: string } {
+    const clientId = process.env.TELEGRAM_OIDC_CLIENT_ID?.trim();
+    const redirectUri = process.env.TELEGRAM_OIDC_REDIRECT_URI?.trim();
+    if (!clientId || !redirectUri) throw new ServiceUnavailableException('Telegram sign-in is not configured');
+    const verifier = randomBytes(32).toString('base64url');
+    const nonce = randomBytes(24).toString('base64url');
+    const state = jwt.sign({ type: 'telegram_oidc', verifier, nonce, redirectUri }, this.secret, { expiresIn: 300, issuer: 'nova-telegram' });
+    const challenge = createHash('sha256').update(verifier).digest('base64url');
+    const query = new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, response_type: 'code', scope: 'openid profile', state, nonce, code_challenge: challenge, code_challenge_method: 'S256' });
+    return { url: `https://oauth.telegram.org/auth?${query.toString()}` };
+  }
+
+  async telegramCallback(code: string, state: string, error?: string): Promise<string> {
+    const frontend = process.env.TELEGRAM_OIDC_FRONTEND_URL?.trim() || 'http://localhost:3000/';
+    if (error) return this.telegramRedirect(frontend, undefined, error);
+    if (!code || !state) throw new BadRequestException('Telegram authorization response is incomplete');
+    const verified = jwt.verify(state, this.secret, { issuer: 'nova-telegram' });
+    if (typeof verified === 'string' || verified.type !== 'telegram_oidc' || typeof verified.verifier !== 'string' || typeof verified.redirectUri !== 'string' || typeof verified.nonce !== 'string') {
+      throw new BadRequestException('Invalid Telegram authorization state');
+    }
+    const clientId = process.env.TELEGRAM_OIDC_CLIENT_ID?.trim();
+    const clientSecret = process.env.TELEGRAM_OIDC_CLIENT_SECRET?.trim();
+    if (!clientId || !clientSecret) throw new ServiceUnavailableException('Telegram sign-in is not configured');
+    const tokenResponse = await fetch('https://oauth.telegram.org/token', {
+      method: 'POST',
+      headers: { Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: verified.redirectUri, client_id: clientId, code_verifier: verified.verifier }).toString(),
+    });
+    if (!tokenResponse.ok) throw new BadRequestException('Telegram authorization code could not be exchanged');
+    const tokenBody = await tokenResponse.json() as { id_token?: string };
+    if (!tokenBody.id_token) throw new BadRequestException('Telegram did not return an ID token');
+    const telegram = await this.verifyTelegramIdToken(tokenBody.id_token, clientId, verified.nonce);
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      const existing = await client.query<UserRow>('SELECT id, email, username, display_name FROM users WHERE telegram_subject = $1 FOR UPDATE', [telegram.sub]);
+      let user: UserResponse;
+      if (existing.rows[0]) {
+        const updated = await client.query<UserRow>('UPDATE users SET telegram_username = $2, telegram_picture = $3, updated_at = now() WHERE id = $1 RETURNING id, email, username, display_name', [existing.rows[0].id, telegram.preferred_username || null, telegram.picture || null]);
+        user = this.toUser(updated.rows[0]);
+      } else {
+        const base = this.telegramUsername(telegram.preferred_username, telegram.sub);
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          const username = attempt === 0 ? base : `${base.slice(0, 25)}_${attempt}`;
+          const inserted = await client.query<UserRow>('INSERT INTO users(email, username, display_name, telegram_subject, telegram_username, telegram_picture) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (username) DO NOTHING RETURNING id, email, username, display_name', [`telegram_${telegram.sub}@telegram.local`, username, (telegram.name || telegram.preferred_username || 'NOVA user').slice(0, 80), telegram.sub, telegram.preferred_username || null, telegram.picture || null]);
+          if (inserted.rows[0]) { user = this.toUser(inserted.rows[0]); break; }
+        }
+        if (!user!) throw new ServiceUnavailableException('Unable to create Telegram account');
+      }
+      const handoff = randomBytes(32).toString('base64url');
+      await client.query("INSERT INTO telegram_handoffs(token_hash, user_id, expires_at) VALUES ($1, $2, now() + interval '2 minutes')", [hashSecret(handoff, this.secret), user.id]);
+      await client.query('COMMIT');
+      return this.telegramRedirect(frontend, handoff);
+    } catch (error) {
+      try { await client.query('ROLLBACK'); } catch { /* transaction may already be rolled back */ }
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async telegramExchange(handoff: string): Promise<TokenResponse> {
+    if (!handoff || handoff.length < 20) throw new BadRequestException('Invalid Telegram handoff');
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      const tokenHash = hashSecret(handoff, this.secret);
+      const result = await client.query<UserRow>('SELECT u.id, u.email, u.username, u.display_name FROM telegram_handoffs h JOIN users u ON u.id = h.user_id WHERE h.token_hash = $1 AND h.expires_at > now() FOR UPDATE OF h', [tokenHash]);
+      if (!result.rows[0]) { await client.query('ROLLBACK'); throw new BadRequestException('Telegram handoff expired'); }
+      await client.query('DELETE FROM telegram_handoffs WHERE token_hash = $1', [tokenHash]);
+      const response = await this.createSession(client, this.toUser(result.rows[0]));
+      await client.query('COMMIT');
+      return response;
+    } catch (error) {
+      try { await client.query('ROLLBACK'); } catch { /* transaction may already be rolled back */ }
+      throw error;
+    } finally { client.release(); }
+  }
+
   async authenticate(token: string): Promise<{ userId: string; sessionId: string } | null> {
     if (!token) return null;
     let claims: string | jwt.JwtPayload;
@@ -142,6 +221,35 @@ export class AuthService {
       [claims.sid, claims.sub],
     );
     return active.rowCount ? { userId: claims.sub, sessionId: claims.sid } : null;
+  }
+
+  private async verifyTelegramIdToken(token: string, clientId: string, nonce: string): Promise<TelegramClaims> {
+    const [encodedHeader, encodedPayload, encodedSignature] = token.split('.');
+    if (!encodedHeader || !encodedPayload || !encodedSignature) throw new BadRequestException('Malformed Telegram ID token');
+    const header = JSON.parse(Buffer.from(encodedHeader, 'base64url').toString()) as { alg?: string; kid?: string };
+    const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString()) as TelegramClaims;
+    if (header.alg !== 'RS256' || !header.kid) throw new BadRequestException('Unsupported Telegram ID token');
+    const keysResponse = await fetch('https://oauth.telegram.org/.well-known/jwks.json');
+    if (!keysResponse.ok) throw new ServiceUnavailableException('Telegram signing keys are unavailable');
+    const keys = await keysResponse.json() as { keys?: Array<Record<string, unknown>> };
+    const jwk = keys.keys?.find((key) => key.kid === header.kid);
+    if (!jwk) throw new BadRequestException('Unknown Telegram signing key');
+    const valid = verifySignature('RSA-SHA256', Buffer.from(`${encodedHeader}.${encodedPayload}`), createPublicKey({ key: jwk as import('node:crypto').JsonWebKey, format: 'jwk' }), Buffer.from(encodedSignature, 'base64url'));
+    const audience = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+    if (!valid || payload.iss !== 'https://oauth.telegram.org' || !audience.includes(clientId) || !payload.sub || payload.exp <= Math.floor(Date.now() / 1000) || payload.nonce !== nonce) throw new BadRequestException('Telegram ID token validation failed');
+    return payload;
+  }
+
+  private telegramUsername(preferred: string | undefined, subject: string): string {
+    const clean = (preferred || '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 24);
+    return clean.length >= 3 ? clean : `tg_${subject.replace(/[^a-z0-9]/gi, '').slice(-20)}`.slice(0, 32);
+  }
+
+  private telegramRedirect(frontend: string, handoff?: string, error?: string): string {
+    const url = new URL(frontend);
+    if (handoff) url.searchParams.set('telegram_handoff', handoff);
+    if (error) url.searchParams.set('telegram_error', error.slice(0, 120));
+    return url.toString();
   }
 
   private async enforceLimit(scope: string, identity: string, limit: number, windowSeconds: number): Promise<void> {

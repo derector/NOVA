@@ -43,6 +43,7 @@ data class MessageDto(
     val text: String,
     val createdAt: String,
     val deliveredAt: String? = null,
+    val readAt: String? = null,
 )
 
 internal data class MessagePageDto(

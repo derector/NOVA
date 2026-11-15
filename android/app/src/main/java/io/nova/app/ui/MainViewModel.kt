@@ -116,7 +116,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun selectChat(chatId: String?) {
         mutableState.value = mutableState.value.copy(selectedChatId = chatId, notice = null)
         if (chatId != null) viewModelScope.launch {
-            runCatching { withContext(Dispatchers.IO) { repository.catchUp(chatId) } }
+            runCatching { withContext(Dispatchers.IO) { repository.catchUp(chatId); repository.markRead(chatId) } }
                 .onFailure { setNotice(friendlyError(it)) }
         }
     }
@@ -168,7 +168,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             error.code == 401 -> "Сессия истекла. Выйдите и войдите снова."
             error.code == 409 -> "Username занят или ключ сообщения конфликтует с другим текстом."
             error.code == 429 -> "Слишком много запросов. Подождите и попробуйте снова."
-            error.code == 503 -> "Сервер ответил, но не смог выполнить запрос. Проверьте настройку отправки email и попробуйте позже; письмо не отправлено."
+            error.code == 502 -> "Сервис NOVA сейчас не отвечает (HTTP 502). Проверьте, что backend запущен, и повторите попытку — введённые данные сохранены."
+            error.code == 503 -> "Сервис NOVA временно недоступен. Если это вход по email, проверьте SMTP; введённые данные сохранены."
             error.code == 408 -> "Сервер не ответил вовремя. Проверьте подключение и попробуйте ещё раз."
             error.code == null && error.retryable -> AuthNetworkMessages.connectionFailure(BuildConfig.API_BASE_URL, BuildConfig.DEBUG)
             error.retryable -> "Сервер временно недоступен (HTTP ${error.code}). Попробуйте позже."

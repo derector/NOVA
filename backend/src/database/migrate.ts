@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Pool } from 'pg';
 
@@ -7,10 +7,12 @@ async function migrate(): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query('CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
-    const name = '001_initial.sql';
-    const exists = await client.query('SELECT 1 FROM schema_migrations WHERE name = $1', [name]);
-    if (exists.rowCount === 0) {
-      const sql = await readFile(join(process.cwd(), 'migrations', name), 'utf8');
+    const migrationDir = join(process.cwd(), 'migrations');
+    const names = (await readdir(migrationDir)).filter((name) => /^\d+_.+\.sql$/.test(name)).sort();
+    for (const name of names) {
+      const exists = await client.query('SELECT 1 FROM schema_migrations WHERE name = $1', [name]);
+      if (exists.rowCount !== 0) continue;
+      const sql = await readFile(join(migrationDir, name), 'utf8');
       await client.query('BEGIN');
       try {
         await client.query(sql);
@@ -21,9 +23,8 @@ async function migrate(): Promise<void> {
         await client.query('ROLLBACK');
         throw error;
       }
-    } else {
-      console.info('Database schema is up to date');
     }
+    console.info('Database schema is up to date');
   } finally {
     client.release();
     await pool.end();

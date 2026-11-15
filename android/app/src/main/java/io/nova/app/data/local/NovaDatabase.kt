@@ -37,6 +37,7 @@ data class MessageEntity(
     val text: String,
     val createdAt: String,
     val deliveredAt: String?,
+    val readAt: String?,
     val status: String,
 )
 
@@ -76,14 +77,17 @@ interface NovaDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertMessage(message: MessageEntity)
 
-    @Query("UPDATE messages SET serverId = :serverId, createdAt = :createdAt, deliveredAt = :deliveredAt, status = 'SENT' WHERE clientMessageId = :clientMessageId")
-    suspend fun confirmMessage(clientMessageId: String, serverId: String, createdAt: String, deliveredAt: String?)
+    @Query("UPDATE messages SET serverId = :serverId, createdAt = :createdAt, deliveredAt = :deliveredAt, readAt = :readAt, status = 'SENT' WHERE clientMessageId = :clientMessageId")
+    suspend fun confirmMessage(clientMessageId: String, serverId: String, createdAt: String, deliveredAt: String?, readAt: String?)
 
     @Query("UPDATE messages SET status = 'FAILED' WHERE clientMessageId = :clientMessageId")
     suspend fun failMessage(clientMessageId: String)
 
     @Query("UPDATE messages SET status = 'PENDING' WHERE clientMessageId = :clientMessageId")
     suspend fun resetMessage(clientMessageId: String)
+
+    @Query("UPDATE messages SET deliveredAt = COALESCE(deliveredAt, :readAt), readAt = :readAt WHERE serverId IN (:serverIds)")
+    suspend fun markRead(serverIds: List<String>, readAt: String)
 
     @Query("SELECT * FROM outbox WHERE state = 'PENDING' ORDER BY createdAt")
     suspend fun pendingOutbox(): List<OutboxEntity>
@@ -116,7 +120,7 @@ interface NovaDao {
     }
 }
 
-@Database(entities = [ChatEntity::class, MessageEntity::class, OutboxEntity::class], version = 1, exportSchema = false)
+@Database(entities = [ChatEntity::class, MessageEntity::class, OutboxEntity::class], version = 2, exportSchema = false)
 abstract class NovaDatabase : RoomDatabase() {
     abstract fun dao(): NovaDao
 
@@ -125,6 +129,8 @@ abstract class NovaDatabase : RoomDatabase() {
             context.applicationContext,
             NovaDatabase::class.java,
             "nova-local.db",
-        ).build()
+        ).addMigrations(object : androidx.room.migration.Migration(1, 2) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) { db.execSQL("ALTER TABLE messages ADD COLUMN readAt TEXT") }
+        }).build()
     }
 }

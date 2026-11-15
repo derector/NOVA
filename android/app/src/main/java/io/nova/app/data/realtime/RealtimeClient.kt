@@ -61,6 +61,12 @@ class RealtimeClient(private val repository: NovaRepository, private val baseUrl
                         .onSuccess { message -> activeScope.launch { repository.acceptSocketMessage(message) } }
                         .onFailure { Log.w(TAG, "Ignoring malformed message:new event", it) }
                 }
+                connection.on("message:read") { args ->
+                    val payload = args.firstOrNull() as? JSONObject ?: return@on
+                    val ids = payload.optJSONArray("messageIds") ?: return@on
+                    val messageIds = buildList { for (index in 0 until ids.length()) add(ids.optString(index)) }.filter { it.isNotBlank() }
+                    activeScope.launch { repository.acceptReadReceipt(messageIds) }
+                }
                 connection.connect()
             }.onFailure { Log.w(TAG, "Socket setup failed", it) }
         }

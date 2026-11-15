@@ -33,7 +33,9 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     });
   }
 
-  handleConnection(_client: Socket): void { /* identity is set by the auth middleware in afterInit. */ }
+  handleConnection(client: Socket): void {
+    if (client.data.userId) void client.join(this.userRoom(client.data.userId));
+  }
 
   handleDisconnect(_client: Socket): void { /* Socket.IO removes the connection from rooms. */ }
 
@@ -58,6 +60,12 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   emitMessage(message: { id: string; clientMessageId: string; chatId: string; senderId: string; text: string; createdAt: string }): void {
     if (!this.server) return;
     this.server.to(this.room(message.chatId)).emit('message:new', message);
+    this.server.to(this.room(message.chatId)).except(this.userRoom(message.senderId)).emit('notification:new', { type: 'message', chatId: message.chatId, messageId: message.id, senderId: message.senderId });
+  }
+
+  emitRead(event: { chatId: string; userId: string; messageIds: string[] }): void {
+    if (!this.server || !event.messageIds.length) return;
+    this.server.to(this.room(event.chatId)).emit('message:read', event);
   }
 
   private async isMember(chatId: string, userId: string): Promise<boolean> {
@@ -65,6 +73,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     return (result.rowCount ?? 0) > 0;
   }
   private room(chatId: string): string { return `chat:${chatId}`; }
+  private userRoom(userId: string): string { return `user:${userId}`; }
   private validUuid(value: unknown): value is string { return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value); }
   private actionError(message: string) { return { ok: false, error: { code: 'FORBIDDEN', message, requestId: randomUUID() } }; }
 }

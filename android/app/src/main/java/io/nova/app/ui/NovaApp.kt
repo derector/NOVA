@@ -392,7 +392,7 @@ private fun MessageBubble(message: MessageEntity, own: Boolean, onRetry: () -> U
                 Text(formatTime(message.createdAt), color = Muted, style = MaterialTheme.typography.labelSmall)
                 if (own) {
                     Spacer(Modifier.width(8.dp))
-                    Text(MessageRules.statusLabel(message.status), color = if (message.status == "FAILED") Color(0xFFFFB4A9) else Accent, style = MaterialTheme.typography.labelSmall)
+                    Text(if (message.readAt != null) "Прочитано ✓✓" else MessageRules.statusLabel(message.status), color = if (message.status == "FAILED") Color(0xFFFFB4A9) else Accent, style = MaterialTheme.typography.labelSmall)
                 }
             }
         }

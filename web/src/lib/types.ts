@@ -25,6 +25,7 @@ export interface NovaMessage {
   text: string;
   createdAt: string;
   deliveredAt?: string | null;
+  readAt?: string | null;
 }
 
 export interface MessagePage {

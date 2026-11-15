@@ -78,6 +78,7 @@ export default function HomePage() {
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [telegramBusy, setTelegramBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [success, setSuccess] = useState('');
   const [online, setOnline] = useState(true);
@@ -221,6 +222,23 @@ export default function HomePage() {
   }, [saveTokens]);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const handoff = params.get('telegram_handoff');
+    const telegramError = params.get('telegram_error');
+    if (telegramError) window.setTimeout(() => setNotice(`Telegram: ${telegramError}`), 0);
+    if (!handoff) return;
+    window.history.replaceState({}, '', window.location.pathname);
+    window.setTimeout(() => setTelegramBusy(true), 0);
+    apiFetch<AuthTokens>(apiPath('/auth/telegram/exchange'), { method: 'POST', body: JSON.stringify({ handoff }) })
+      .then((tokens) => {
+        if (!tokens.accessToken || !tokens.refreshToken || !tokens.accessTokenExpiresAt || !tokens.user) throw new Error('Backend вернул неполный ответ Telegram-авторизации.');
+        saveTokens(tokens);
+      })
+      .catch((error: unknown) => setNotice(getErrorMessage(error)))
+      .finally(() => setTelegramBusy(false));
+  }, [saveTokens]);
+
+  useEffect(() => {
     const updateOnline = () => setOnline(navigator.onLine);
     updateOnline();
     window.addEventListener('online', updateOnline);
@@ -351,6 +369,17 @@ export default function HomePage() {
         ? { ...chat, updatedAt: message.createdAt }
         : chat).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)));
     });
+    socket.on('notification:new', (notification: { type?: string; chatId?: string }) => {
+      if (notification?.type === 'message' && notification.chatId && notification.chatId !== selectedChatRef.current) {
+        setNotice('Новое сообщение в другом диалоге.');
+      }
+    });
+    socket.on('message:read', (event: { chatId?: string; messageIds?: string[] }) => {
+      if (!event?.chatId || !Array.isArray(event.messageIds) || event.chatId !== selectedChatRef.current) return;
+      const ids = new Set(event.messageIds);
+      const readAt = new Date().toISOString();
+      setMessages((current) => current.map((message) => ids.has(message.id) ? { ...message, deliveredAt: message.deliveredAt || readAt, readAt } : message));
+    });
     socket.connect();
     return () => {
       socket.removeAllListeners();
@@ -378,6 +407,8 @@ export default function HomePage() {
       setMessages(items);
       setLoadingChatId(null);
       setMessagesLoadError('');
+      void authenticatedFetch<{ chatId: string; messageIds: string[] }>(apiPath(`/chats/${selectedChatId}/read`), { method: 'POST' })
+        .catch((error: unknown) => setNotice(`Не удалось подтвердить прочтение: ${getErrorMessage(error)}`));
       const newest = newestMessage(items);
       if (newest) cursorRef.current[selectedChatId] = newest.id;
       setNotice('');
@@ -409,6 +440,19 @@ export default function HomePage() {
     } catch (error) {
       setNotice(getErrorMessage(error));
     } finally { setBusy(false); }
+  }
+
+  async function startTelegram() {
+    setTelegramBusy(true);
+    setNotice('');
+    try {
+      const result = await apiFetch<{ url: string }>(apiPath('/auth/telegram/start'));
+      if (!result.url.startsWith('https://oauth.telegram.org/auth?')) throw new Error('Backend вернул небезопасный Telegram URL.');
+      window.location.assign(result.url);
+    } catch (error) {
+      setNotice(getErrorMessage(error));
+      setTelegramBusy(false);
+    }
   }
 
   async function verifyCode(event: FormEvent<HTMLFormElement>) {
@@ -578,6 +622,10 @@ export default function HomePage() {
             <label htmlFor="email">Email</label>
             <input id="email" type="email" autoComplete="email" maxLength={320} required placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} />
             <button className="button button-primary button-wide" type="submit" disabled={busy}>{busy ? <><span className="button-spinner" />Запрашиваем код…</> : <>Получить код <Icon name="arrow" size={18} /></>}</button>
+            <div className="auth-divider"><span>или</span></div>
+            <button className="button button-telegram button-wide" type="button" onClick={() => void startTelegram()} disabled={busy || telegramBusy}>
+              {telegramBusy ? <><span className="button-spinner button-spinner-dark" />Открываем Telegram…</> : <><Icon name="message" size={18} />Войти через Telegram</>}
+            </button>
           </form> : <form className="form-stack" onSubmit={verifyCode}>
             <label htmlFor="otp">Одноразовый код</label>
             <input id="otp" className="otp-input" inputMode="numeric" autoComplete="one-time-code" minLength={6} maxLength={12} required placeholder="000000" value={code} onChange={(event) => setCode(event.target.value)} />
@@ -671,7 +719,7 @@ export default function HomePage() {
               {messages.map((message) => {
                 const outgoing = message.senderId === me?.id;
                 return <article key={message.id} className={`message-row${outgoing ? ' message-outgoing' : ''}`}>
-                  <div className="message-bubble"><p>{message.text}</p><div className="message-meta"><time dateTime={message.createdAt}>{humanDate(message.createdAt)}</time>{outgoing && <span title={message.deliveredAt ? 'Доставлено' : 'Сохранено сервером'}>{message.deliveredAt ? 'Доставлено' : 'Сервер ✓'}</span>}</div></div>
+                  <div className="message-bubble"><p>{message.text}</p><div className="message-meta"><time dateTime={message.createdAt}>{humanDate(message.createdAt)}</time>{outgoing && <span title={message.readAt ? 'Прочитано' : message.deliveredAt ? 'Доставлено' : 'Сохранено сервером'}>{message.readAt ? '✓✓ Прочитано' : message.deliveredAt ? '✓ Доставлено' : '✓ Сохранено'}</span>}</div></div>
                 </article>;
               })}
             </>}

@@ -68,6 +68,10 @@ internal class NovaApi(baseUrl: String) {
         return decode(execute("GET", builder.build(), token = token, accepted = setOf(200)))
     }
 
+    suspend fun markRead(token: String, chatId: String) {
+        execute("POST", "api/v1/chats/$chatId/read", token = token, accepted = setOf(200))
+    }
+
     suspend fun sendMessage(token: String, chatId: String, key: String, text: String): MessageDto {
         val request = Request.Builder()
             .url(endpoint("api/v1/chats/$chatId/messages"))

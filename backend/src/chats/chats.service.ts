@@ -4,10 +4,10 @@ import { decideIdempotency } from '../common/security.helpers';
 import type { PoolClient } from 'pg';
 
 interface PublicUserRow { id: string; username: string; display_name: string }
-interface MessageRow { id: string; client_message_id: string; chat_id: string; sender_id: string; text: string; created_at: Date | string; delivered_at: Date | string | null }
+interface MessageRow { id: string; client_message_id: string; chat_id: string; sender_id: string; text: string; created_at: Date | string; delivered_at: Date | string | null; read_at: Date | string | null }
 type PublicUser = { id: string; username: string; displayName: string };
 type ChatDto = { id: string; participant: PublicUser; updatedAt: string };
-export type MessageDto = { id: string; clientMessageId: string; chatId: string; senderId: string; text: string; createdAt: string; deliveredAt: string | null };
+export type MessageDto = { id: string; clientMessageId: string; chatId: string; senderId: string; text: string; createdAt: string; deliveredAt: string | null; readAt: string | null };
 
 @Injectable()
 export class ChatsService {
@@ -62,10 +62,13 @@ export class ChatsService {
       cursorTime = cursor.rows[0].created_at;
     }
     const result = await this.db.query<MessageRow>(
-      `SELECT id, client_message_id, chat_id, sender_id, text, created_at, delivered_at
-         FROM messages
-        WHERE chat_id = $1 AND ($2::timestamptz IS NULL OR (created_at, id) > ($2::timestamptz, $3::uuid))
-        ORDER BY created_at ASC, id ASC LIMIT $4`,
+      `SELECT m.id, m.client_message_id, m.chat_id, m.sender_id, m.text, m.created_at, m.delivered_at,
+              MAX(r.read_at) AS read_at
+         FROM messages m
+         LEFT JOIN message_receipts r ON r.message_id = m.id AND r.user_id <> m.sender_id
+        WHERE m.chat_id = $1 AND ($2::timestamptz IS NULL OR (m.created_at, m.id) > ($2::timestamptz, $3::uuid))
+        GROUP BY m.id
+        ORDER BY m.created_at ASC, m.id ASC LIMIT $4`,
       [chatId, cursorTime ?? null, after ?? null, limit + 1],
     );
     const hasMore = result.rows.length > limit;
@@ -82,13 +85,13 @@ export class ChatsService {
         `INSERT INTO messages(chat_id, sender_id, client_message_id, text)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (chat_id, sender_id, client_message_id) DO NOTHING
-         RETURNING id, client_message_id, chat_id, sender_id, text, created_at, delivered_at`, [chatId, userId, key, text],
+         RETURNING id, client_message_id, chat_id, sender_id, text, created_at, delivered_at, NULL::timestamptz AS read_at`, [chatId, userId, key, text],
       );
       let row = inserted.rows[0];
       let created = true;
       if (!row) {
         const existing = await client.query<MessageRow>(
-          `SELECT id, client_message_id, chat_id, sender_id, text, created_at, delivered_at
+          `SELECT id, client_message_id, chat_id, sender_id, text, created_at, delivered_at, NULL::timestamptz AS read_at
              FROM messages WHERE chat_id = $1 AND sender_id = $2 AND client_message_id = $3 FOR UPDATE`, [chatId, userId, key],
         );
         row = existing.rows[0];
@@ -101,6 +104,35 @@ export class ChatsService {
       }
       await client.query('COMMIT');
       return { message: this.message(row), created };
+    } catch (error) {
+      try { await client.query('ROLLBACK'); } catch { /* already closed */ }
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async markRead(userId: string, chatId: string): Promise<string[]> {
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      if (!await this.isMemberWithClient(client, chatId, userId)) throw new ForbiddenException('User cannot access this chat');
+      const unread = await client.query<{ id: string }>(
+        `SELECT m.id FROM messages m
+          WHERE m.chat_id = $1 AND m.sender_id <> $2
+            AND NOT EXISTS (SELECT 1 FROM message_receipts r WHERE r.message_id = m.id AND r.user_id = $2 AND r.read_at IS NOT NULL)`,
+        [chatId, userId],
+      );
+      const ids = unread.rows.map((row) => row.id);
+      if (ids.length) {
+        await client.query(
+          `INSERT INTO message_receipts(message_id, user_id, delivered_at, read_at)
+           SELECT id, $2, now(), now() FROM messages WHERE id = ANY($1::uuid[])
+           ON CONFLICT (message_id, user_id) DO UPDATE SET delivered_at = COALESCE(message_receipts.delivered_at, now()), read_at = now()`,
+          [ids, userId],
+        );
+        await client.query('UPDATE messages SET delivered_at = COALESCE(delivered_at, now()) WHERE id = ANY($1::uuid[])', [ids]);
+      }
+      await client.query('COMMIT');
+      return ids;
     } catch (error) {
       try { await client.query('ROLLBACK'); } catch { /* already closed */ }
       throw error;
@@ -120,7 +152,7 @@ export class ChatsService {
   private message(row: MessageRow): MessageDto {
     return {
       id: row.id, clientMessageId: row.client_message_id, chatId: row.chat_id, senderId: row.sender_id,
-      text: row.text, createdAt: this.asIso(row.created_at), deliveredAt: row.delivered_at ? this.asIso(row.delivered_at) : null,
+      text: row.text, createdAt: this.asIso(row.created_at), deliveredAt: row.delivered_at ? this.asIso(row.delivered_at) : null, readAt: row.read_at ? this.asIso(row.read_at) : null,
     };
   }
   private asIso(value: Date | string): string { return new Date(value).toISOString(); }
