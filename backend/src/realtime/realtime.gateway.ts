@@ -4,9 +4,11 @@ import { Server, Socket } from 'socket.io';
 import { AuthService } from '../auth/auth.service';
 import { DatabaseService } from '../database/database.module';
 import { randomUUID } from 'node:crypto';
+import { RealtimePresenceService } from './realtime-presence.service';
 
 const corsOrigins = (process.env.CORS_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean);
 interface ChatAction { chatId?: string }
+interface TypingAction extends ChatAction { isTyping?: boolean }
 
 @Injectable()
 @WebSocketGateway({ cors: { origin: corsOrigins, credentials: true }, transports: ['websocket', 'polling'] })
@@ -14,7 +16,11 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   @WebSocketServer() server!: Server;
   private readonly logger = new Logger(RealtimeGateway.name);
 
-  constructor(private readonly auth: AuthService, private readonly db: DatabaseService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly db: DatabaseService,
+    private readonly presence: RealtimePresenceService,
+  ) {}
 
   afterInit(server: Server): void {
     // Authenticate before the connection is accepted so a client that emits
@@ -34,10 +40,20 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   handleConnection(client: Socket): void {
-    if (client.data.userId) void client.join(this.userRoom(client.data.userId));
+    if (!client.data.userId) return;
+    void client.join(this.userRoom(client.data.userId));
+    const snapshot = this.presence.heartbeat(client.data.userId);
+    void this.emitPresenceToMemberships(client.data.userId, snapshot);
   }
 
-  handleDisconnect(_client: Socket): void { /* Socket.IO removes the connection from rooms. */ }
+  handleDisconnect(client: Socket): void {
+    const userId = client.data.userId as string | undefined;
+    if (!userId) return;
+    const stillConnected = [...this.server.sockets.sockets.values()].some((socket) => socket.id !== client.id && socket.data.userId === userId);
+    if (stillConnected) return;
+    const snapshot = this.presence.disconnect(userId);
+    void this.emitPresenceToMemberships(userId, snapshot);
+  }
 
   @SubscribeMessage('chat:join')
   async join(@ConnectedSocket() client: Socket, @MessageBody() payload: ChatAction) {
@@ -57,6 +73,28 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     return { ok: true, chatId };
   }
 
+  @SubscribeMessage('presence:heartbeat')
+  heartbeat(@ConnectedSocket() client: Socket) {
+    const userId = client.data.userId as string | undefined;
+    if (!userId) return this.actionError('Unauthorized');
+    const snapshot = this.presence.heartbeat(userId);
+    return { ok: true, presence: snapshot };
+  }
+
+  @SubscribeMessage('typing:set')
+  async typing(@ConnectedSocket() client: Socket, @MessageBody() payload: TypingAction) {
+    const chatId = payload?.chatId;
+    const userId = client.data.userId as string | undefined;
+    if (!this.validUuid(chatId) || !userId) return this.actionError('Invalid chatId');
+    if (!await this.isMember(chatId, userId)) return this.actionError('Chat access denied');
+    const active = payload?.isTyping !== false;
+    const changed = active ? this.presence.setTyping(chatId, userId) : this.presence.stopTyping(chatId, userId);
+    if (changed && this.server) {
+      client.to(this.room(chatId)).emit('typing:update', { chatId, userId, isTyping: active });
+    }
+    return { ok: true, chatId, isTyping: active };
+  }
+
   emitMessage(message: { id: string; clientMessageId: string; chatId: string; senderId: string; text: string; createdAt: string }): void {
     if (!this.server) return;
     this.server.to(this.room(message.chatId)).emit('message:new', message);
@@ -74,6 +112,14 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   emitMessageDeleted(message: { id: string; chatId: string; text: string; deletedAt: string | null }): void {
     if (this.server) this.server.to(this.room(message.chatId)).emit('message:deleted', message);
+  }
+
+  private async emitPresenceToMemberships(userId: string, snapshot: { userId: string; status: 'online' | 'offline'; lastSeenAt: string | null }): Promise<void> {
+    if (!this.server) return;
+    const memberships = await this.db.query('SELECT chat_id FROM chat_members WHERE user_id = $1', [userId]);
+    for (const row of memberships.rows as Array<{ chat_id: string }>) {
+      this.server.to(this.room(row.chat_id)).except(this.userRoom(userId)).emit('presence:update', snapshot);
+    }
   }
 
   private async isMember(chatId: string, userId: string): Promise<boolean> {

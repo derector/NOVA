@@ -336,7 +336,12 @@ private fun ChatScreen(state: MainUiState, chat: ChatEntity?, viewModel: MainVie
         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = draft,
-                onValueChange = { if (it.length <= 10_000) draft = it },
+                onValueChange = {
+                    if (it.length <= 10_000) {
+                        draft = it
+                        viewModel.typing(chatId, it.trim().isNotEmpty())
+                    }
+                },
                 placeholder = { Text("Сообщение") },
                 enabled = !state.busy,
                 maxLines = 4,

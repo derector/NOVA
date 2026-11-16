@@ -26,6 +26,8 @@ REST API личных чатов работает с PostgreSQL и провер�
 
 Требуется сценарий с двумя пользователями на Android/web при активных PostgreSQL/SMTP: online send, offline queue/retry, перезапуск процесса и отсутствие дублей. Такой end-to-end сценарий не выполнялся.
 
+Typing/presence vertical slice added locally: authenticated `presence:heartbeat` leases use bounded TTL, `presence:update` is emitted only to authorized chat rooms, multiple sockets for one user are handled, and `typing:set` is membership-checked with automatic expiry. Web sends/receives the events and shows online/last-seen and typing state; Android sends heartbeat and typing state from the native Compose composer. Current store is single-instance in-process TTL; replacing it with Redis is required before horizontal scaling.
+
 ## 4. Минимальный web-клиент — IMPLEMENTED; deployment/E2E ожидают
 
 Отдельный Next.js/React/TypeScript frontend реализует email OTP, профиль, поиск по username, личный чат и text messages через тот же API. Access token остаётся в памяти; body-based refresh API хранит refresh token в `sessionStorage`, не в `localStorage`. `sessionStorage` доступен JavaScript на том же origin; до production лучше перейти на `HttpOnly; Secure; SameSite` cookie с CSRF-защитой.

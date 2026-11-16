@@ -14,6 +14,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import org.json.JSONObject
 
 class RealtimeClient(private val repository: NovaRepository, private val baseUrl: String) {
@@ -49,7 +50,14 @@ class RealtimeClient(private val repository: NovaRepository, private val baseUrl
                 socket = connection
                 connection.on(Socket.EVENT_CONNECT) {
                     activeScope.launch {
+                        connection.emit("presence:heartbeat")
                         repository.chatIds().forEach { join(it) }
+                    }
+                }
+                activeScope.launch {
+                    while (true) {
+                        delay(30_000)
+                        if (connection.connected()) connection.emit("presence:heartbeat")
                     }
                 }
                 connection.on(Socket.EVENT_CONNECT_ERROR) { args ->
@@ -96,6 +104,10 @@ class RealtimeClient(private val repository: NovaRepository, private val baseUrl
                 }
             }
         })
+    }
+
+    fun setTyping(chatId: String, isTyping: Boolean) {
+        socket?.takeIf { it.connected() }?.emit("typing:set", JSONObject().put("chatId", chatId).put("isTyping", isTyping))
     }
 
     private companion object { const val TAG = "NovaRealtime" }

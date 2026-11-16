@@ -7,6 +7,7 @@ import type { AuthTokens, MessagePage, NovaChat, NovaMessage, NovaPublicUser, No
 
 type Screen = 'email' | 'verify' | 'profile' | 'app';
 type SocketState = 'connecting' | 'connected' | 'disconnected';
+type PresenceState = { status: 'online' | 'offline'; lastSeenAt: string | null };
 const REFRESH_TOKEN_KEY = 'nova.refreshToken';
 
 function Icon({ name, size = 20 }: { name: 'spark' | 'search' | 'plus' | 'send' | 'logout' | 'back' | 'message' | 'arrow'; size?: number }) {
@@ -99,6 +100,8 @@ export default function HomePage() {
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchError, setSearchError] = useState('');
   const [chatBusyUserId, setChatBusyUserId] = useState<string | null>(null);
+  const [presenceByUser, setPresenceByUser] = useState<Record<string, PresenceState>>({});
+  const [typingUserId, setTypingUserId] = useState<string | null>(null);
 
   const socketRef = useRef<Socket | null>(null);
   const chatsRef = useRef<NovaChat[]>([]);
@@ -107,6 +110,7 @@ export default function HomePage() {
   const cursorRef = useRef<Record<string, string>>({});
   const refreshInFlight = useRef<Promise<string> | null>(null);
   const pendingSendRef = useRef<{ text: string; key: string } | null>(null);
+  const typingTimerRef = useRef<number | null>(null);
 
   useEffect(() => { chatsRef.current = chats; }, [chats]);
   useEffect(() => { selectedChatRef.current = selectedChatId; }, [selectedChatId]);
@@ -127,6 +131,8 @@ export default function HomePage() {
     setNotice('');
     setSuccess('');
     setScreen(!tokens.user.username || !tokens.user.displayName ? 'profile' : 'app');
+    setPresenceByUser({});
+    setTypingUserId(null);
   }, []);
 
   const refreshAccessToken = useCallback(async (): Promise<string> => {
@@ -191,6 +197,8 @@ export default function HomePage() {
     setLoadingChatId(null);
     setSelectedChatId(null);
     setSocketState('connecting');
+    setPresenceByUser({});
+    setTypingUserId(null);
     setScreen('email');
     setNotice('');
     setSuccess('');
@@ -335,6 +343,7 @@ export default function HomePage() {
 
     socket.on('connect', () => {
       setSocketState('connected');
+      socket.emit('presence:heartbeat');
       chatsRef.current.forEach((chat) => {
         socket.emit('chat:join', { chatId: chat.id }, (ack?: { error?: { message?: string } }) => {
           if (ack?.error?.message) setNotice(`Не удалось подключиться к диалогу: ${ack.error.message}`);
@@ -344,6 +353,9 @@ export default function HomePage() {
       if (activeChat) void catchUpChat(activeChat).catch((error: unknown) => setNotice(`Не удалось восстановить историю после подключения: ${getErrorMessage(error)}`));
     });
     socket.on('disconnect', () => setSocketState('disconnected'));
+    const heartbeat = window.setInterval(() => {
+      if (socket.connected) socket.emit('presence:heartbeat');
+    }, 30_000);
     socket.on('connect_error', (error: Error) => {
       setSocketState('disconnected');
       if (refreshingSocket || !/auth|token|unauthorized|expired|jwt/i.test(error.message)) return;
@@ -389,13 +401,34 @@ export default function HomePage() {
     socket.on('message:deleted', (message: NovaMessage) => {
       if (message?.chatId === selectedChatRef.current) setMessages((current) => mergeMessages(current, [message]));
     });
+    socket.on('presence:update', (event: { userId?: string; status?: 'online' | 'offline'; lastSeenAt?: string | null }) => {
+      if (!event?.userId || (event.status !== 'online' && event.status !== 'offline')) return;
+      setPresenceByUser((current) => ({ ...current, [event.userId as string]: { status: event.status as 'online' | 'offline', lastSeenAt: event.lastSeenAt ?? null } }));
+    });
+    socket.on('typing:update', (event: { chatId?: string; userId?: string; isTyping?: boolean }) => {
+      if (event?.chatId !== selectedChatRef.current || !event.userId) return;
+      setTypingUserId(event.isTyping ? event.userId : null);
+    });
     socket.connect();
     return () => {
+      window.clearInterval(heartbeat);
+      if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current);
       socket.removeAllListeners();
       socket.disconnect();
       if (socketRef.current === socket) socketRef.current = null;
     };
   }, [screen, accessToken, catchUpChat, refreshAccessToken]);
+
+  const emitTyping = useCallback((isTyping: boolean) => {
+    if (!selectedChatId || !socketRef.current?.connected) return;
+    socketRef.current.emit('typing:set', { chatId: selectedChatId, isTyping });
+    if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current);
+    if (isTyping) {
+      typingTimerRef.current = window.setTimeout(() => {
+        socketRef.current?.emit('typing:set', { chatId: selectedChatId, isTyping: false });
+      }, 4_000);
+    }
+  }, [selectedChatId]);
 
   useEffect(() => {
     const socket = socketRef.current;
@@ -629,6 +662,7 @@ export default function HomePage() {
   }
 
   const selectedChat = useMemo(() => chats.find((chat) => chat.id === selectedChatId) || null, [chats, selectedChatId]);
+  const selectedPresence = selectedChat ? presenceByUser[selectedChat.participant.id] : undefined;
   const messagesLoading = selectedChatId !== null && loadingChatId === selectedChatId;
   const usernameValid = /^[A-Za-z0-9_]{3,32}$/.test(username.trim());
   const profileValid = usernameValid && displayName.trim().length >= 1 && displayName.trim().length <= 80;
@@ -749,7 +783,7 @@ export default function HomePage() {
           <div className="conversation-head">
             <button className="mobile-back" onClick={() => { setMessages([]); setMessagesLoadError(''); setLoadingChatId(null); setSelectedChatId(null); }} aria-label="Назад к диалогам"><Icon name="back" /></button>
             <span className="avatar">{(selectedChat.participant.displayName || selectedChat.participant.username || '?').slice(0, 1).toUpperCase()}</span>
-            <div className="conversation-person"><h2>{selectedChat.participant.displayName || selectedChat.participant.username}</h2><p>@{selectedChat.participant.username}</p></div>
+            <div className="conversation-person"><h2>{selectedChat.participant.displayName || selectedChat.participant.username}</h2><p>@{selectedChat.participant.username} · {selectedPresence?.status === 'online' ? 'в сети' : selectedPresence?.lastSeenAt ? `был(а) ${humanDate(selectedPresence.lastSeenAt)}` : 'не в сети'}</p></div>
             <span className="conversation-state"><button className="mute-button" type="button" onClick={() => void toggleMute(selectedChat)}>{selectedChat.mutedUntil ? 'Включить звук' : 'Без звука'}</button><span className="connection-dot" />Личный диалог</span>
           </div>
           <div className="conversation-scope"><span className="scope-pill">E2E SCOPE</span><span>Текстовая переписка · Без медиа и звонков</span></div>
@@ -766,11 +800,12 @@ export default function HomePage() {
                 </article>;
               })}
             </>}
+            {typingUserId === selectedChat.participant.id && <div className="typing-indicator" role="status"><span className="typing-dots"><i /><i /><i /></span>{selectedChat.participant.displayName || selectedChat.participant.username} печатает…</div>}
           </div>
           <form className="composer" onSubmit={sendMessage}>
             {!online && <p className="composer-help">Нет сети — сообщение не будет отправлено.</p>}
             <div className="composer-box"><label className="visually-hidden" htmlFor="message-text">Текст сообщения</label>
-              <textarea id="message-text" value={draft} maxLength={10000} rows={1} placeholder={online ? 'Напишите сообщение…' : 'Вы офлайн'} disabled={!online} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />
+              <textarea id="message-text" value={draft} maxLength={10000} rows={1} placeholder={online ? 'Напишите сообщение…' : 'Вы офлайн'} disabled={!online} onChange={(event) => { setDraft(event.target.value); emitTyping(event.target.value.trim().length > 0); }} onBlur={() => emitTyping(false)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); emitTyping(false); event.currentTarget.form?.requestSubmit(); } }} />
               <div className="composer-actions"><span>{draft.length > 9000 ? `${draft.length}/10000` : 'Enter — отправить · Shift + Enter — перенос'}</span><button className="send-button" type="submit" disabled={!online || sending || !draft.trim()} aria-label="Отправить сообщение" title="Отправить сообщение">{sending ? <span className="button-spinner" /> : <Icon name="send" size={18} />}</button></div>
             </div>
             <p className="composer-foot">Каждое сообщение подтверждается REST API с уникальным Idempotency-Key.</p>

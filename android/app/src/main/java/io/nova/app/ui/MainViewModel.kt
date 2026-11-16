@@ -124,12 +124,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun messages(chatId: String) = repository.observeMessages(chatId)
 
     fun send(chatId: String, text: String) = perform(clearNotice = true) {
+        appContainer.realtime.setTyping(chatId, false)
         withContext(Dispatchers.IO) { repository.sendMessage(chatId, text) }
         // The durable WorkManager outbox owns retries; foreground UI never invents a server acknowledgement.
     }
 
     fun retry(clientMessageId: String) = perform {
         withContext(Dispatchers.IO) { repository.retryMessage(clientMessageId) }
+    }
+
+    fun typing(chatId: String, active: Boolean) {
+        appContainer.realtime.setTyping(chatId, active)
     }
 
     fun refresh() = perform { repository.syncChats() }
