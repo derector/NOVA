@@ -1,9 +1,9 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Pool } from 'pg';
+import { createDatabasePool } from './pool';
 
 async function migrate(): Promise<void> {
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  const pool = createDatabasePool();
   const client = await pool.connect();
   try {
     await client.query('SELECT pg_advisory_lock(706621953)');
