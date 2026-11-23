@@ -5,6 +5,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import io.nova.app.NovaApplication
 import io.nova.app.data.remote.ApiFailure
+import kotlinx.coroutines.CancellationException
 
 class OutboxWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
@@ -12,6 +13,8 @@ class OutboxWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         return try {
             repository.flushOutbox()
             Result.success()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (error: ApiFailure) {
             if (error.retryable || error.code == 401) Result.retry() else Result.failure()
         } catch (_: Exception) {

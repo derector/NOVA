@@ -2,10 +2,16 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { AppearanceButton } from '@/components/appearance';
+import NovaAssistant from '@/components/NovaAssistant';
+import { ProfileEditor, UserAvatar } from '@/components/profile-editor';
+import { CallControls } from '@/components/call-controls';
 import { API_BASE_URL, apiFetch, apiPath, NovaApiError } from '@/lib/api';
 import type { AuthTokens, MessagePage, NovaChat, NovaMessage, NovaPublicUser, NovaUser } from '@/lib/types';
 
 type Screen = 'email' | 'verify' | 'profile' | 'app';
+type AuthMode = 'register' | 'login';
+const DOWNLOAD_URL = process.env.NEXT_PUBLIC_NOVA_DOWNLOAD_URL;
 type SocketState = 'connecting' | 'connected' | 'disconnected';
 const REFRESH_TOKEN_KEY = 'nova.refreshToken';
 
@@ -25,7 +31,7 @@ function Icon({ name, size = 20 }: { name: 'spark' | 'search' | 'plus' | 'send' 
 
 function Brand({ compact = false }: { compact?: boolean }) {
   return <div className={`brand${compact ? ' brand-compact' : ''}`} aria-label="NOVA">
-    <span className="brand-mark"><Icon name="spark" size={21} /></span>
+    <span className="brand-mark" aria-hidden="true">N</span>
     <span className="brand-word">NOVA<span className="brand-period">.</span></span>
   </div>;
 }
@@ -62,6 +68,11 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Не удалось выполнить запрос. Попробуйте ещё раз.';
 }
 
+function needsProfileSetup(user: NovaUser) {
+  return !user.username || !user.displayName ||
+    (user.displayName === 'Пользователь NOVA' && /^nova_[a-f0-9]{12}$/.test(user.username));
+}
+
 function isNovaChat(value: unknown): value is NovaChat {
   if (!value || typeof value !== 'object') return false;
   const chat = value as Partial<NovaChat>;
@@ -70,6 +81,7 @@ function isNovaChat(value: unknown): value is NovaChat {
 
 export default function HomePage() {
   const [screen, setScreen] = useState<Screen>('email');
+  const [authMode, setAuthMode] = useState<AuthMode>('register');
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -82,6 +94,7 @@ export default function HomePage() {
   const [success, setSuccess] = useState('');
   const [online, setOnline] = useState(true);
   const [socketState, setSocketState] = useState<SocketState>('connecting');
+  const [callSocket, setCallSocket] = useState<Socket | null>(null);
   const [chats, setChats] = useState<NovaChat[]>([]);
   const [chatsLoaded, setChatsLoaded] = useState(false);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
@@ -89,7 +102,7 @@ export default function HomePage() {
   const [loadingChatId, setLoadingChatId] = useState<string | null>(null);
   const [messagesLoadError, setMessagesLoadError] = useState('');
   const [historyAttempt, setHistoryAttempt] = useState(0);
-  const [draft, setDraft] = useState('');
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [sending, setSending] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -101,20 +114,38 @@ export default function HomePage() {
   const socketRef = useRef<Socket | null>(null);
   const chatsRef = useRef<NovaChat[]>([]);
   const selectedChatRef = useRef<string | null>(null);
-  const messagesRef = useRef<NovaMessage[]>([]);
   const cursorRef = useRef<Record<string, string>>({});
   const refreshInFlight = useRef<Promise<string> | null>(null);
-  const pendingSendRef = useRef<{ text: string; key: string } | null>(null);
+  const accessTokenRef = useRef<string | null>(null);
+  const sessionGeneration = useRef(0);
+  const pendingSendRef = useRef<Record<string, { text: string; key: string }>>({});
+  const searchDialogRef = useRef<HTMLDialogElement>(null);
+  const historyTailRef = useRef<HTMLDivElement>(null);
+  const draft = selectedChatId ? drafts[selectedChatId] ?? '' : '';
+
+  useEffect(() => {
+    const dialog = searchDialogRef.current;
+    if (searchOpen && dialog && !dialog.open) dialog.showModal();
+    if (!searchOpen && dialog?.open) dialog.close();
+  }, [searchOpen]);
+
+  useEffect(() => {
+    historyTailRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [selectedChatId, messages]);
 
   useEffect(() => { chatsRef.current = chats; }, [chats]);
-  useEffect(() => { selectedChatRef.current = selectedChatId; }, [selectedChatId]);
-  useEffect(() => { messagesRef.current = messages; }, [messages]);
+
+
 
   const saveTokens = useCallback((tokens: AuthTokens) => {
     window.sessionStorage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken);
+    accessTokenRef.current = tokens.accessToken;
     setAccessToken(tokens.accessToken);
     setAccessExpiresAt(tokens.accessTokenExpiresAt);
     setMe(tokens.user);
+    void apiFetch<NovaUser>(apiPath('/users/me'), {}, tokens.accessToken).then((profile) => {
+      setMe((current) => current?.id === profile.id ? profile : current);
+    }).catch(() => {});
     setEmail(tokens.user.email);
     setUsername(tokens.user.username || '');
     setDisplayName(tokens.user.displayName || '');
@@ -124,7 +155,40 @@ export default function HomePage() {
     setSocketState('connecting');
     setNotice('');
     setSuccess('');
-    setScreen(!tokens.user.username || !tokens.user.displayName ? 'profile' : 'app');
+    setScreen(needsProfileSetup(tokens.user) ? 'profile' : 'app');
+  }, []);
+
+  const discardSession = useCallback(() => {
+    window.sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+    socketRef.current?.disconnect();
+    socketRef.current = null;
+    setCallSocket(null);
+    accessTokenRef.current = null;
+    sessionGeneration.current += 1;
+    setAccessToken(null);
+    setAccessExpiresAt(null);
+    setMe(null);
+    setChats([]);
+    chatsRef.current = [];
+    setChatsLoaded(false);
+    setMessages([]);
+    setLoadingChatId(null);
+    setMessagesLoadError('');
+    selectedChatRef.current = null;
+    setSelectedChatId(null);
+    setSocketState('connecting');
+    setDrafts({});
+    setSending(false);
+    setSearchOpen(false);
+    setSearchResults([]);
+    setSearchTerm('');
+    setEmail('');
+    setCode('');
+    pendingSendRef.current = {};
+    cursorRef.current = {};
+    setScreen('email');
+    setNotice('');
+    setSuccess('');
   }, []);
 
   const refreshAccessToken = useCallback(async (): Promise<string> => {
@@ -132,93 +196,83 @@ export default function HomePage() {
     const refreshToken = window.sessionStorage.getItem(REFRESH_TOKEN_KEY);
     if (!refreshToken) throw new NovaApiError({ status: 401, message: 'Сессия завершена. Войдите по email.' });
 
-    const refreshPromise = apiFetch<Omit<AuthTokens, 'user'> & { user?: NovaUser }>(apiPath('/auth/refresh'), {
+    const refreshPromise = apiFetch<AuthTokens>(apiPath('/auth/refresh'), {
       method: 'POST',
       body: JSON.stringify({ refreshToken }),
     }).then((tokens) => {
       if (!tokens.accessToken || !tokens.refreshToken || !tokens.accessTokenExpiresAt) {
-        throw new Error('Backend вернул неполный ответ обновления сессии.');
+        throw new Error('Сервер не смог обновить данные сеанса.');
+      }
+      if (window.sessionStorage.getItem(REFRESH_TOKEN_KEY) !== refreshToken) {
+        throw new NovaApiError({ status: 401, message: 'Сессия завершена.' });
       }
       window.sessionStorage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken);
+      accessTokenRef.current = tokens.accessToken;
       setAccessToken(tokens.accessToken);
       setAccessExpiresAt(tokens.accessTokenExpiresAt);
-      setSocketState('connecting');
       return tokens.accessToken;
     }).catch((error: unknown) => {
-      if (error instanceof NovaApiError && error.status === 401) {
-        window.sessionStorage.removeItem(REFRESH_TOKEN_KEY);
-        setAccessToken(null);
-        setMe(null);
-        setScreen('email');
-      }
+      if (error instanceof NovaApiError && error.status === 401 &&
+          window.sessionStorage.getItem(REFRESH_TOKEN_KEY) === refreshToken) discardSession();
       throw error;
     }).finally(() => {
-      refreshInFlight.current = null;
+      if (refreshInFlight.current === refreshPromise) refreshInFlight.current = null;
     });
     refreshInFlight.current = refreshPromise;
     return refreshPromise;
-  }, []);
+  }, [discardSession]);
 
   const authenticatedFetch = useCallback(async <T,>(path: string, options: RequestInit = {}): Promise<T> => {
-    if (!accessToken) throw new NovaApiError({ status: 401, message: 'Войдите, чтобы продолжить.' });
+    const token = accessTokenRef.current;
+    const generation = sessionGeneration.current;
+    const requireSession = () => {
+      if (sessionGeneration.current !== generation) {
+        throw new NovaApiError({ status: 401, message: 'Сессия завершена.' });
+      }
+    };
+    if (!token) throw new NovaApiError({ status: 401, message: 'Войдите, чтобы продолжить.' });
+    let result: T;
     try {
-      return await apiFetch<T>(path, options, accessToken);
+      result = await apiFetch<T>(path, options, token);
     } catch (error) {
+      requireSession();
       if (!(error instanceof NovaApiError) || error.status !== 401) throw error;
-      const nextToken = await refreshAccessToken();
-      return apiFetch<T>(path, options, nextToken);
+      const currentToken = accessTokenRef.current;
+      const nextToken = currentToken && currentToken !== token ? currentToken : await refreshAccessToken();
+      result = await apiFetch<T>(path, options, nextToken);
     }
-  }, [accessToken, refreshAccessToken]);
+    requireSession();
+    return result;
+  }, [refreshAccessToken]);
 
   const clearSession = useCallback(async () => {
-    const currentToken = accessToken;
-    try {
-      if (currentToken) await apiFetch<void>(apiPath('/auth/logout'), { method: 'POST' }, currentToken);
-    } catch {
-      // Clear local credentials even if the server is offline; the refresh token is not retained.
+    refreshInFlight.current = null;
+    discardSession();
+    if (accessToken) {
+      await apiFetch<void>(apiPath('/auth/logout'), { method: 'POST' }, accessToken).catch(() => {
+        // The tab is already signed out if the API is temporarily unreachable.
+      });
     }
-    window.sessionStorage.removeItem(REFRESH_TOKEN_KEY);
-    socketRef.current?.disconnect();
-    socketRef.current = null;
-    setAccessToken(null);
-    setAccessExpiresAt(null);
-    setMe(null);
-    setChats([]);
-    setChatsLoaded(false);
-    setMessages([]);
-    setLoadingChatId(null);
-    setSelectedChatId(null);
-    setSocketState('connecting');
-    setScreen('email');
-    setNotice('');
-    setSuccess('');
-  }, [accessToken]);
+  }, [accessToken, discardSession]);
 
   useEffect(() => {
-    const refreshToken = window.sessionStorage.getItem(REFRESH_TOKEN_KEY);
-    if (!refreshToken) return;
+    if (!window.sessionStorage.getItem(REFRESH_TOKEN_KEY)) return;
     let active = true;
-    apiFetch<Omit<AuthTokens, 'user'> & { user?: NovaUser }>(apiPath('/auth/refresh'), {
-      method: 'POST',
-      body: JSON.stringify({ refreshToken }),
-    }).then(async (tokens) => {
-      if (!tokens.accessToken || !tokens.refreshToken || !tokens.accessTokenExpiresAt) throw new Error('Некорректный ответ обновления сессии.');
-      window.sessionStorage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken);
-      const user = await apiFetch<NovaUser>(apiPath('/users/me'), {}, tokens.accessToken);
+    void refreshAccessToken().then(async (token) => {
+      const user = await apiFetch<NovaUser>(apiPath('/users/me'), {}, token);
       if (!active) return;
-      saveTokens({ ...tokens, user });
+      setMe(user);
+      setEmail(user.email);
+      setUsername(user.username || '');
+      setDisplayName(user.displayName || '');
+      setScreen(needsProfileSetup(user) ? 'profile' : 'app');
     }).catch((error: unknown) => {
-      if (error instanceof NovaApiError && error.status === 401) {
-        window.sessionStorage.removeItem(REFRESH_TOKEN_KEY);
-      }
-      if (active) {
-        if (!(error instanceof NovaApiError && error.status === 401)) {
-          setNotice(`Не удалось восстановить сессию: ${getErrorMessage(error)}`);
-        }
+      if (active && !(error instanceof NovaApiError && error.status === 401)) {
+        setNotice(`Не удалось восстановить сессию: ${getErrorMessage(error)}`);
       }
     });
     return () => { active = false; };
-  }, [saveTokens]);
+  }, [refreshAccessToken]);
 
   useEffect(() => {
     const updateOnline = () => setOnline(navigator.onLine);
@@ -302,20 +356,35 @@ export default function HomePage() {
   }, [authenticatedFetch]);
 
   useEffect(() => {
-    if (screen !== 'app' || !accessToken) return;
+    if (screen !== 'app') return;
     const socket = io(API_BASE_URL, {
       path: '/socket.io/',
       autoConnect: false,
-      auth: { token: accessToken },
+      auth: (sendAuth) => sendAuth({ token: accessTokenRef.current }),
       reconnection: true,
       reconnectionDelay: 500,
       reconnectionDelayMax: 5000,
     });
     socketRef.current = socket;
     let refreshingSocket = false;
+    let active = true;
+    let listRefresh = 0;
+    const reloadChats = () => {
+      const request = ++listRefresh;
+      void authenticatedFetch<NovaChat[]>(apiPath('/chats')).then((items) => {
+        if (!active || request !== listRefresh) return;
+        setChats(items);
+        chatsRef.current = items;
+        setChatsLoaded(true);
+      }).catch((error: unknown) => {
+        if (active) setNotice(getErrorMessage(error));
+      });
+    };
 
     socket.on('connect', () => {
       setSocketState('connected');
+      setCallSocket(socket);
+      reloadChats();
       chatsRef.current.forEach((chat) => {
         socket.emit('chat:join', { chatId: chat.id }, (ack?: { error?: { message?: string } }) => {
           if (ack?.error?.message) setNotice(`Не удалось подключиться к диалогу: ${ack.error.message}`);
@@ -324,28 +393,26 @@ export default function HomePage() {
       const activeChat = selectedChatRef.current;
       if (activeChat) void catchUpChat(activeChat).catch((error: unknown) => setNotice(`Не удалось восстановить историю после подключения: ${getErrorMessage(error)}`));
     });
-    socket.on('disconnect', () => setSocketState('disconnected'));
+    socket.on('disconnect', () => {
+      setSocketState('disconnected');
+      setCallSocket(null);
+    });
     socket.on('connect_error', (error: Error) => {
+      setCallSocket(null);
       setSocketState('disconnected');
       if (refreshingSocket || !/auth|token|unauthorized|expired|jwt/i.test(error.message)) return;
       refreshingSocket = true;
-      void refreshAccessToken().then((nextToken) => {
-        socket.auth = { token: nextToken };
-        socket.disconnect();
-        socket.connect();
+      void refreshAccessToken().then(() => {
+        if (active && !socket.connected) socket.connect();
       }).catch((refreshError: unknown) => {
         setNotice(`Не удалось обновить сессию для realtime: ${getErrorMessage(refreshError)}`);
       }).finally(() => { refreshingSocket = false; });
     });
+    socket.on('chat:new', reloadChats);
     socket.on('message:new', (message: NovaMessage) => {
       if (!message || typeof message.id !== 'string' || typeof message.chatId !== 'string') return;
       if (message.chatId === selectedChatRef.current) {
         setMessages((current) => mergeMessages(current, [message]));
-      }
-      const previousCursor = cursorRef.current[message.chatId];
-      const existing = messagesRef.current.find((item) => item.chatId === message.chatId);
-      if (!previousCursor || !existing || Date.parse(message.createdAt) >= Date.parse(existing.createdAt)) {
-        cursorRef.current[message.chatId] = message.id;
       }
       setChats((current) => current.map((chat) => chat.id === message.chatId
         ? { ...chat, updatedAt: message.createdAt }
@@ -353,11 +420,13 @@ export default function HomePage() {
     });
     socket.connect();
     return () => {
+      active = false;
+      setCallSocket((current) => current === socket ? null : current);
       socket.removeAllListeners();
       socket.disconnect();
       if (socketRef.current === socket) socketRef.current = null;
     };
-  }, [screen, accessToken, catchUpChat, refreshAccessToken]);
+  }, [screen, authenticatedFetch, catchUpChat, refreshAccessToken]);
 
   useEffect(() => {
     const socket = socketRef.current;
@@ -375,7 +444,7 @@ export default function HomePage() {
     authenticatedFetch<MessagePage>(apiPath(`/chats/${selectedChatId}/messages?limit=100`)).then((page) => {
       if (!active) return;
       const items = mergeMessages([], page.items);
-      setMessages(items);
+      setMessages((current) => selectedChatRef.current === selectedChatId ? mergeMessages(current, items) : current);
       setLoadingChatId(null);
       setMessagesLoadError('');
       const newest = newestMessage(items);
@@ -391,10 +460,7 @@ export default function HomePage() {
     });
     const socket = socketRef.current;
     if (socket?.connected) socket.emit('chat:join', { chatId: selectedChatId });
-    return () => {
-      active = false;
-      if (socket?.connected) socket.emit('chat:leave', { chatId: selectedChatId });
-    };
+    return () => { active = false; };
   }, [selectedChatId, accessToken, screen, authenticatedFetch, historyAttempt, catchUpChat]);
 
   async function requestCode(event: FormEvent<HTMLFormElement>) {
@@ -405,7 +471,7 @@ export default function HomePage() {
     try {
       await apiFetch<void>(apiPath('/auth/request-code'), { method: 'POST', body: JSON.stringify({ email: email.trim() }) });
       setScreen('verify');
-      setSuccess(`Если адрес ${email.trim()} может использовать NOVA, письмо с кодом отправлено.`);
+      setSuccess('Проверьте также папку «Спам».');
     } catch (error) {
       setNotice(getErrorMessage(error));
     } finally { setBusy(false); }
@@ -445,7 +511,7 @@ export default function HomePage() {
       setUsername(updated.username);
       setDisplayName(updated.displayName);
       setScreen('app');
-      setSuccess('Профиль сохранён. Теперь можно найти второго пользователя по username.');
+      setSuccess('');
     } catch (error) { setNotice(getErrorMessage(error)); }
     finally { setBusy(false); }
   }
@@ -454,7 +520,7 @@ export default function HomePage() {
     event.preventDefault();
     const term = searchTerm.trim().replace(/^@/, '');
     if (!term) {
-      setSearchError('Введите username для поиска.');
+      setSearchError('Введите имя пользователя.');
       setSearchResults([]);
       return;
     }
@@ -465,7 +531,7 @@ export default function HomePage() {
       const results = await authenticatedFetch<NovaPublicUser[]>(`${apiPath('/users/search')}?${new URLSearchParams({ username: term })}`);
       if (!Array.isArray(results)) throw new Error('Backend вернул результаты поиска в неожиданном формате.');
       setSearchResults(results);
-      if (!results.length) setSearchError('Пользователь с таким username не найден. Проверьте написание.');
+      if (!results.length) setSearchError('Пользователь не найден. Проверьте написание.');
     } catch (error) { setSearchError(getErrorMessage(error)); }
     finally { setSearchBusy(false); }
   }
@@ -497,11 +563,12 @@ export default function HomePage() {
       setMessages([]);
       setMessagesLoadError('');
       setLoadingChatId(chat.id);
+      selectedChatRef.current = chat.id;
       setSelectedChatId(chat.id);
       setSearchOpen(false);
       setSearchResults([]);
       setSearchTerm('');
-      setSuccess(`Открыт личный диалог с @${user.username}.`);
+      setSuccess('');
     } catch (error) { setSearchError(getErrorMessage(error)); }
     finally { setChatBusyUserId(null); }
   }
@@ -517,10 +584,11 @@ export default function HomePage() {
     setSending(true);
     setNotice('');
     try {
-      const clientMessageId = pendingSendRef.current?.text === text
-        ? pendingSendRef.current.key
+      const pending = pendingSendRef.current[selectedChatId];
+      const clientMessageId = pending?.text === text
+        ? pending.key
         : crypto.randomUUID();
-      pendingSendRef.current = { text, key: clientMessageId };
+      pendingSendRef.current[selectedChatId] = { text, key: clientMessageId };
       const message = await authenticatedFetch<NovaMessage>(apiPath(`/chats/${selectedChatId}/messages`), {
         method: 'POST',
         headers: { 'Idempotency-Key': clientMessageId },
@@ -529,16 +597,14 @@ export default function HomePage() {
       if (!message || typeof message.id !== 'string' || typeof message.clientMessageId !== 'string' || message.chatId !== selectedChatId) {
         throw new Error('Backend вернул неподтверждённое или некорректное сообщение. Черновик оставлен в поле ввода.');
       }
-      setMessages((current) => mergeMessages(current, [message]));
-      cursorRef.current[selectedChatId] = message.id;
+      setMessages((current) => selectedChatRef.current === selectedChatId ? mergeMessages(current, [message]) : current);
       setChats((current) => current.map((chat) => chat.id === selectedChatId
         ? { ...chat, updatedAt: message.createdAt }
         : chat).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)));
-      setDraft('');
-      pendingSendRef.current = null;
-      setSuccess('Сообщение сохранено сервером.');
+      setDrafts((current) => current[selectedChatId]?.trim() === text ? { ...current, [selectedChatId]: '' } : current);
+      delete pendingSendRef.current[selectedChatId];
     } catch (error) {
-      setNotice(`${getErrorMessage(error)} Текст оставлен в поле; повторная отправка этого текста использует тот же Idempotency-Key.`);
+      if (selectedChatRef.current === selectedChatId) setNotice(`${getErrorMessage(error)} Черновик сохранён.`);
     } finally { setSending(false); }
   }
 
@@ -549,56 +615,51 @@ export default function HomePage() {
 
   if (screen === 'email' || screen === 'verify') {
     return <main className="auth-shell">
-      <div className="auth-glow auth-glow-one" /><div className="auth-glow auth-glow-two" />
       <section className="auth-side">
-        <Brand />
+        <div className="auth-brand-row"><Brand /><AppearanceButton /></div>
         <div className="auth-intro">
-          <span className="eyebrow"><span className="eyebrow-line" />ЛИЧНЫЕ ДИАЛОГИ · E2E</span>
-          <h1>Связь без<br /><span>лишнего шума.</span></h1>
-          <p>Проверьте настоящий обмен сообщениями между NOVA Web и Android — через общий API и realtime-канал.</p>
-          <div className="flow-steps">
-            <div className="flow-step"><span>01</span><div><b>Email-код</b><small>Одноразовый код с реальной доставкой</small></div></div>
-            <div className="flow-step"><span>02</span><div><b>Личный диалог</b><small>Поиск пользователя по username</small></div></div>
-            <div className="flow-step"><span>03</span><div><b>Синхронизация</b><small>Серверное подтверждение и catch-up</small></div></div>
-          </div>
+          <h1>Пространство для <span>разговоров.</span></h1>
+          <p>Находите друзей по имени пользователя и продолжайте переписку в браузере или на Android.</p>
+          {DOWNLOAD_URL && <a className="download-link" href={DOWNLOAD_URL}>Скачать NOVA для Android <Icon name="arrow" size={16} /></a>}
         </div>
-        <p className="auth-footnote">NOVA · сквозной клиент для проверки ядра продукта</p>
       </section>
       <section className="auth-form-side">
-        <div className="auth-card">
-          <div className="auth-card-mark"><Icon name="spark" size={22} /></div>
-          <p className="eyebrow">{screen === 'email' ? 'НАЧАТЬ СЕАНС' : 'ПРОВЕРИТЬ ПОЧТУ'}</p>
-          <h2>{screen === 'email' ? 'Войти в NOVA' : 'Код уже в пути'}</h2>
+        <div className="auth-card" key={screen}>
+          <h2>{screen === 'verify' ? 'Проверьте почту' : authMode === 'register' ? 'Создайте аккаунт' : 'Войдите в NOVA'}</h2>
           <p className="auth-description">{screen === 'email'
-            ? 'Укажите email. Если доставка настроена, backend отправит одноразовый код на почту.'
-            : <>Введите код из письма для <strong>{email}</strong>. Код одноразовый и ограничен по времени.</>}</p>
-          {notice && <Notice>{notice}</Notice>}
+            ? 'Введите электронную почту, чтобы получить одноразовый код.'
+            : <>Введите код из письма для <strong>{email}</strong>.</>}</p>
+          {notice && <div id="auth-error"><Notice>{notice}</Notice></div>}
           {success && <Notice tone="success">{success}</Notice>}
           {screen === 'email' ? <form className="form-stack" onSubmit={requestCode}>
             <label htmlFor="email">Email</label>
-            <input id="email" type="email" autoComplete="email" maxLength={320} required placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} />
+            <input id="email" aria-describedby={notice ? "auth-error" : undefined} type="email" autoComplete="email" maxLength={320} required placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} />
             <button className="button button-primary button-wide" type="submit" disabled={busy}>{busy ? <><span className="button-spinner" />Запрашиваем код…</> : <>Получить код <Icon name="arrow" size={18} /></>}</button>
           </form> : <form className="form-stack" onSubmit={verifyCode}>
             <label htmlFor="otp">Одноразовый код</label>
-            <input id="otp" className="otp-input" inputMode="numeric" autoComplete="one-time-code" minLength={6} maxLength={12} required placeholder="000000" value={code} onChange={(event) => setCode(event.target.value)} />
+            <input id="otp" aria-describedby={notice ? "auth-error" : undefined} className="otp-input" pattern="[0-9]{6,12}" inputMode="numeric" autoComplete="one-time-code" minLength={6} maxLength={12} required placeholder="000000" value={code} onChange={(event) => setCode(event.target.value)} />
             <button className="button button-primary button-wide" type="submit" disabled={busy}>{busy ? <><span className="button-spinner" />Проверяем…</> : <>Подтвердить email <Icon name="arrow" size={18} /></>}</button>
             <button className="button button-quiet button-wide" type="button" onClick={() => { setScreen('email'); setNotice(''); setSuccess(''); setCode(''); }}>Изменить email или запросить новый код</button>
           </form>}
-          <div className="auth-security"><span className="security-lock" aria-hidden="true">◆</span><span>Соединение напрямую с API <code>{API_BASE_URL}</code>. Клиент не содержит ключей почтового провайдера.</span></div>
+          {screen === 'email' && <div className="auth-mode">
+            <span>{authMode === 'register' ? 'Уже зарегистрированы?' : 'Впервые в NOVA?'}</span>
+            <button type="button" className="text-button" disabled={busy} onClick={() => {
+              setAuthMode(authMode === 'register' ? 'login' : 'register');
+              setNotice('');
+            }}>{authMode === 'register' ? 'Войти' : 'Создать аккаунт'}</button>
+          </div>}
         </div>
-        <p className="legal-note">Email-код подтверждает доступ к почте. Backend может ограничивать запросы и срок действия кода.</p>
       </section>
     </main>;
   }
 
   if (screen === 'profile') {
     return <main className="profile-shell">
-      <header className="topbar profile-topbar"><Brand /><span className="topbar-kicker">НАСТРОЙКА ПРОФИЛЯ</span><span className="topbar-spacer" /><span className="account-email">{email}</span><button className="icon-button" aria-label="Выйти" title="Выйти" onClick={() => void clearSession()}><Icon name="logout" /></button></header>
+      <header className="topbar profile-topbar"><Brand /><span className="topbar-kicker">НАСТРОЙКА ПРОФИЛЯ</span><span className="topbar-spacer" /><span className="account-email">{email}</span><AppearanceButton /><button className="icon-button" aria-label="Выйти" title="Выйти" onClick={() => void clearSession()}><Icon name="logout" /></button></header>
       <section className="profile-card">
         <div className="auth-card-mark"><Icon name="spark" size={22} /></div>
-        <p className="eyebrow">ВАШ ПРОФИЛЬ</p>
-        <h1>Задайте имя<br />для диалогов.</h1>
-        <p className="auth-description">Username поможет другим участникам найти вас в тестовом сценарии. Изменения сохраняются на сервере.</p>
+        <h1>Настройте профиль</h1>
+        <p className="auth-description">Другие пользователи NOVA смогут найти вас по имени пользователя.</p>
         {notice && <Notice>{notice}</Notice>}
         {!online && <Notice tone="info">Нет подключения к сети. Профиль нельзя сохранить офлайн.</Notice>}
         <form className="form-stack" onSubmit={saveProfile}>
@@ -616,58 +677,53 @@ export default function HomePage() {
   return <main className={`app-shell${selectedChatId ? ' has-selection' : ''}`}>
     <header className="topbar app-topbar">
       <Brand compact />
-      <span className="topbar-divider" />
-      <span className="topbar-kicker">ЛИЧНЫЕ ДИАЛОГИ <span className="scope-pill">E2E</span></span>
       <span className="topbar-spacer" />
       <div className={`connection-pill ${!online ? 'connection-offline' : socketState === 'connected' ? 'connection-live' : 'connection-wait'}`} aria-live="polite">
-        <span className="connection-dot" />{!online ? 'Нет сети' : socketState === 'connected' ? 'Realtime подключён' : socketState === 'connecting' ? 'Подключаемся…' : 'Realtime отключён'}
+        <span className="connection-dot" />{!online ? 'Нет сети' : socketState === 'connected' ? 'На связи' : socketState === 'connecting' ? 'Подключаемся…' : 'Связь прервана'}
       </div>
-      <div className="account-chip"><span className="avatar avatar-small">{(me?.displayName || me?.username || 'N').slice(0, 1).toUpperCase()}</span><span>{me?.displayName || me?.username}</span></div>
+      <AppearanceButton />
+      {accessToken && <NovaAssistant accessToken={accessToken} />}
+      <CallControls socket={callSocket} chat={selectedChat} />
+      {me && <ProfileEditor user={me} request={authenticatedFetch} onUpdate={setMe} />}
       <button className="icon-button" aria-label="Выйти из аккаунта" title="Выйти" onClick={() => void clearSession()}><Icon name="logout" /></button>
     </header>
 
     {!online && <div className="offline-banner" role="status">Вы офлайн. Историю можно просматривать из уже загруженных данных; отправка и синхронизация недоступны.</div>}
     <div className="workspace">
       <aside className="sidebar" aria-label="Список диалогов">
-        <div className="sidebar-heading"><div><p className="eyebrow">ВАША СЕТЬ</p><h1>Диалоги<span className="heading-count">{chats.length}</span></h1></div>
+        <div className="sidebar-heading"><h1>Диалоги</h1>
           <button className="button button-new" onClick={() => { setSearchOpen(true); setSearchError(''); setSearchResults([]); }}><Icon name="plus" size={18} /><span>Новый</span></button>
         </div>
         <button className="search-launch" onClick={() => { setSearchOpen(true); setSearchError(''); }}><Icon name="search" size={17} /><span>Найти по username</span><kbd>/</kbd></button>
-        <div className="list-label"><span>ЛИЧНЫЕ</span><span>{chats.length}</span></div>
         <div className="chat-list" aria-live="polite">
           {!chatsLoaded && !chats.length && <div className="list-state"><span className="loader loader-small" />Загружаем диалоги…</div>}
           {chatsLoaded && !chats.length && <div className="empty-list"><div className="empty-icon"><Icon name="message" size={21} /></div><b>Пока нет диалогов</b><span>Найдите пользователя по username и начните личную переписку.</span><button className="text-button" onClick={() => setSearchOpen(true)}>Найти пользователя <Icon name="arrow" size={15} /></button></div>}
-      {chats.map((chat) => <button key={chat.id} className={`chat-row${chat.id === selectedChatId ? ' chat-row-active' : ''}`} onClick={() => { if (chat.id === selectedChatId) return; setMessages([]); setMessagesLoadError(''); setLoadingChatId(chat.id); setSelectedChatId(chat.id); setNotice(''); setSuccess(''); }}>
-            <span className="avatar">{(chat.participant.displayName || chat.participant.username || '?').slice(0, 1).toUpperCase()}</span>
+      {chats.map((chat) => <button key={chat.id} className={`chat-row${chat.id === selectedChatId ? ' chat-row-active' : ''}`} aria-current={chat.id === selectedChatId ? true : undefined} onClick={() => { if (chat.id === selectedChatId) return; setMessages([]); setMessagesLoadError(''); setLoadingChatId(chat.id); selectedChatRef.current = chat.id; setSelectedChatId(chat.id); setNotice(''); setSuccess(''); }}>
+            <UserAvatar user={chat.participant} />
             <span className="chat-row-copy"><span className="chat-row-name">{chat.participant.displayName || chat.participant.username}</span><span className="chat-row-sub">@{chat.participant.username || 'без username'}</span></span>
             <span className="chat-row-time">{humanDate(chat.updatedAt)}</span>
           </button>)}
         </div>
-        <div className="sidebar-foot"><span className="tiny-brand-mark"><Icon name="spark" size={14} /></span><span>Только ядро E2E</span><span className="sidebar-foot-line" /></div>
       </aside>
 
       <section className="conversation" aria-label={selectedChat ? `Диалог с ${selectedChat.participant.displayName}` : 'Выбранный диалог'}>
         {!selectedChat ? <div className="welcome-panel">
           <div className="welcome-orbit orbit-one" /><div className="welcome-orbit orbit-two" />
           <div className="welcome-mark"><Icon name="spark" size={31} /></div>
-          <p className="eyebrow">NOVA · РЕАЛЬНОЕ ВРЕМЯ</p>
           <h2>Каждый диалог<br /><span>начинается здесь.</span></h2>
-          <p className="welcome-copy">Выберите переписку или найдите второго пользователя. Сообщения отправляются на сервер, подтверждаются API и приходят через Socket.IO.</p>
+          <p className="welcome-copy">Откройте диалог в списке или найдите собеседника по имени пользователя.</p>
           <button className="button button-primary" onClick={() => setSearchOpen(true)}><Icon name="plus" size={18} />Начать диалог</button>
-          <div className="welcome-foot"><span className="welcome-line" /> REST для истории <span className="welcome-separator">·</span> Socket.IO для событий</div>
         </div> : <>
           <div className="conversation-head">
-            <button className="mobile-back" onClick={() => { setMessages([]); setMessagesLoadError(''); setLoadingChatId(null); setSelectedChatId(null); }} aria-label="Назад к диалогам"><Icon name="back" /></button>
-            <span className="avatar">{(selectedChat.participant.displayName || selectedChat.participant.username || '?').slice(0, 1).toUpperCase()}</span>
+            <button className="mobile-back" onClick={() => { setMessages([]); setMessagesLoadError(''); setLoadingChatId(null); selectedChatRef.current = null; setSelectedChatId(null); }} aria-label="Назад к диалогам"><Icon name="back" /></button>
+            <UserAvatar user={selectedChat.participant} />
             <div className="conversation-person"><h2>{selectedChat.participant.displayName || selectedChat.participant.username}</h2><p>@{selectedChat.participant.username}</p></div>
             <span className="conversation-state"><span className="connection-dot" />Личный диалог</span>
           </div>
-          <div className="conversation-scope"><span className="scope-pill">E2E SCOPE</span><span>Текстовая переписка · Без медиа и звонков</span></div>
           {notice && <div className="conversation-notice"><Notice onClose={() => setNotice('')}>{notice}</Notice></div>}
           {success && <div className="conversation-notice"><Notice tone="success" onClose={() => setSuccess('')}>{success}</Notice></div>}
           <div className="message-scroll" aria-live="polite" aria-label="История сообщений">
-            {messagesLoading ? <div className="message-placeholder"><span className="loader loader-small" />Загружаем историю с сервера…</div> : messagesLoadError ? <div className="message-empty"><div className="empty-icon"><Icon name="message" /></div><b>Не удалось загрузить историю</b><span>{messagesLoadError}</span><button className="text-button" onClick={() => { if (!selectedChatId) return; setMessagesLoadError(''); setLoadingChatId(selectedChatId); setHistoryAttempt((attempt) => attempt + 1); }}>Повторить <Icon name="arrow" size={15} /></button></div> : !messages.length ? <div className="message-empty"><div className="empty-icon"><Icon name="message" /></div><b>Начало переписки</b><span>Отправьте первое текстовое сообщение. Оно появится после подтверждения сервером.</span></div> : <>
-              <div className="history-note"><span />ИСТОРИЯ С СЕРВЕРА<span /></div>
+            {messagesLoading ? <div className="message-placeholder"><span className="loader loader-small" />Загружаем сообщения…</div> : messagesLoadError ? <div className="message-empty"><div className="empty-icon"><Icon name="message" /></div><b>Не удалось загрузить историю</b><span>{messagesLoadError}</span><button className="text-button" onClick={() => { if (!selectedChatId) return; setMessagesLoadError(''); setLoadingChatId(selectedChatId); setHistoryAttempt((attempt) => attempt + 1); }}>Повторить <Icon name="arrow" size={15} /></button></div> : !messages.length ? <div className="message-empty"><div className="empty-icon"><Icon name="message" /></div><b>Начало переписки</b><span>Отправьте первое текстовое сообщение.</span></div> : <>
               {messages.map((message) => {
                 const outgoing = message.senderId === me?.id;
                 return <article key={message.id} className={`message-row${outgoing ? ' message-outgoing' : ''}`}>
@@ -675,30 +731,32 @@ export default function HomePage() {
                 </article>;
               })}
             </>}
+            <div ref={historyTailRef} />
           </div>
           <form className="composer" onSubmit={sendMessage}>
             {!online && <p className="composer-help">Нет сети — сообщение не будет отправлено.</p>}
             <div className="composer-box"><label className="visually-hidden" htmlFor="message-text">Текст сообщения</label>
-              <textarea id="message-text" value={draft} maxLength={10000} rows={1} placeholder={online ? 'Напишите сообщение…' : 'Вы офлайн'} disabled={!online} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />
+              <textarea id="message-text" value={draft} maxLength={10000} rows={1} placeholder={online ? 'Напишите сообщение…' : 'Вы офлайн'} disabled={!online} onChange={(event) => {
+                const chatId = selectedChatId;
+                const value = event.target.value;
+                if (chatId) setDrafts((current) => ({ ...current, [chatId]: value }));
+              }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />
               <div className="composer-actions"><span>{draft.length > 9000 ? `${draft.length}/10000` : 'Enter — отправить · Shift + Enter — перенос'}</span><button className="send-button" type="submit" disabled={!online || sending || !draft.trim()} aria-label="Отправить сообщение" title="Отправить сообщение">{sending ? <span className="button-spinner" /> : <Icon name="send" size={18} />}</button></div>
             </div>
-            <p className="composer-foot">Каждое сообщение подтверждается REST API с уникальным Idempotency-Key.</p>
           </form>
         </>}
       </section>
     </div>
 
-    {searchOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSearchOpen(false); }}>
-      <section className="search-modal" role="dialog" aria-modal="true" aria-labelledby="search-title">
+    <dialog className="glass-dialog search-modal" ref={searchDialogRef} aria-labelledby="search-title" onClose={() => setSearchOpen(false)}>
+      {searchOpen && <>
         <div className="modal-head"><div className="auth-card-mark modal-mark"><Icon name="search" size={20} /></div><button className="icon-button modal-close" aria-label="Закрыть" onClick={() => setSearchOpen(false)}>×</button></div>
-        <p className="eyebrow">ПОИСК ПОЛЬЗОВАТЕЛЕЙ</p><h2 id="search-title">Кого ищем?</h2><p className="auth-description">Введите username. Результаты возвращает авторизованный API — фиктивных профилей здесь нет.</p>
+        <p className="eyebrow">ПОИСК ПОЛЬЗОВАТЕЛЕЙ</p><h2 id="search-title">Кого ищем?</h2><p className="auth-description">Введите имя пользователя NOVA.</p>
         <form className="user-search-form" onSubmit={searchUsers}><label className="visually-hidden" htmlFor="search-username">Username пользователя</label><span>@</span><input id="search-username" autoFocus autoComplete="off" maxLength={32} placeholder="username" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} /><button className="button button-primary" type="submit" disabled={searchBusy}>{searchBusy ? <span className="button-spinner" /> : <><Icon name="search" size={17} />Поиск</>}</button></form>
         {searchError && <Notice>{searchError}</Notice>}
         {searchBusy && <div className="search-state"><span className="loader loader-small" />Ищем в NOVA…</div>}
-        {searchResults.length > 0 && <div className="search-results"><p className="list-label">РЕЗУЛЬТАТЫ · {searchResults.length}</p>{searchResults.map((user) => <div className="search-result" key={user.id}><span className="avatar">{(user.displayName || user.username || '?').slice(0, 1).toUpperCase()}</span><div className="search-result-copy"><b>{user.displayName || user.username}</b><span>@{user.username}</span></div>{user.id === me?.id ? <span className="self-label">Это вы</span> : <button className="button button-secondary" onClick={() => void startDirectChat(user)} disabled={chatBusyUserId !== null}>{chatBusyUserId === user.id ? <span className="button-spinner" /> : <><Icon name="message" size={16} />Открыть диалог</>}</button>}</div>)}</div>}
-        <div className="modal-foot"><span className="connection-dot" />Поиск использует ваш текущий access token.</div>
-      </section>
-    </div>}
-    {screen === 'app' && accessExpiresAt && <span className="visually-hidden" aria-live="off">Срок текущего access token: {accessExpiresAt}</span>}
+        {searchResults.length > 0 && <div className="search-results"><p className="list-label">РЕЗУЛЬТАТЫ · {searchResults.length}</p>{searchResults.map((user) => <div className="search-result" key={user.id}><UserAvatar user={user} /><div className="search-result-copy"><b>{user.displayName || user.username}</b><span>@{user.username}</span></div>{user.id === me?.id ? <span className="self-label">Это вы</span> : <button className="button button-secondary" onClick={() => void startDirectChat(user)} disabled={chatBusyUserId !== null}>{chatBusyUserId === user.id ? <span className="button-spinner" /> : <><Icon name="message" size={16} />Открыть диалог</>}</button>}</div>)}</div>}
+      </>}
+    </dialog>
   </main>;
 }

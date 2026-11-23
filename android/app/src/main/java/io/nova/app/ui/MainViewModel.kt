@@ -1,13 +1,16 @@
 package io.nova.app.ui
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import io.nova.app.NovaApplication
 import io.nova.app.data.local.ChatEntity
 import io.nova.app.data.remote.ApiFailure
+import io.nova.app.data.remote.ProfileMediaSlot
 import io.nova.app.data.remote.PublicUserDto
+import io.nova.app.data.remote.UserDto
 import io.nova.app.data.repo.NovaRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,6 +32,7 @@ data class MainUiState(
     val busy: Boolean = false,
     val notice: String? = null,
     val profileSearchQuery: String = "",
+    val profile: UserDto? = null,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -38,12 +42,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val state: StateFlow<MainUiState> = mutableState.asStateFlow()
     val online = appContainer.networkMonitor.online
     val chats = repository.observeChats()
+    private val defaultUsername = Regex("^nova_[a-f0-9]{12}$")
 
     init {
         repository.sessionStore.read()?.let { session ->
             mutableState.value = MainUiState(
                 signedIn = true,
-                profileRequired = session.username.isBlank(),
+                profileRequired = profileRequired(session.username, session.displayName),
                 email = session.email,
                 userId = session.userId,
                 username = session.username,
@@ -65,7 +70,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setEmail(value: String) { mutableState.value = mutableState.value.copy(email = value, notice = null) }
-    fun setCodeRequested(value: Boolean) { mutableState.value = mutableState.value.copy(codeRequested = value) }
+    fun setCodeRequested(value: Boolean) { mutableState.value = mutableState.value.copy(codeRequested = value, notice = null) }
     fun setSearchQuery(value: String) { mutableState.value = mutableState.value.copy(profileSearchQuery = value) }
 
     fun requestCode() = perform {
@@ -83,7 +88,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         appContainer.realtime.start()
         mutableState.value = mutableState.value.copy(
             signedIn = true,
-            profileRequired = session.username.isBlank(),
+            profileRequired = profileRequired(session.username, session.displayName),
             userId = session.userId,
             username = session.username,
             displayName = session.displayName,
@@ -91,11 +96,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun completeProfile(username: String, displayName: String) = perform {
-        require(username.matches(Regex("^[A-Za-z0-9_]{3,32}$"))) { "Username: 3–32 символа, латиница, цифры и _" }
+    fun completeProfile(username: String, displayName: String, bio: String? = null) = perform {
+        require(username.matches(Regex("^[A-Za-z0-9_]{3,32}$"))) { "Имя пользователя: 3–32 символа, латиница, цифры и _" }
         require(displayName.trim().isNotEmpty() && displayName.trim().length <= 80) { "Введите имя (до 80 символов)" }
-        repository.completeProfile(username, displayName.trim())
-        mutableState.value = mutableState.value.copy(profileRequired = false, username = username, displayName = displayName.trim(), notice = null)
+        require(bio == null || bio.length <= 240) { "Описание должно быть не длиннее 240 символов" }
+        applyProfile(repository.completeProfile(username, displayName.trim(), bio?.trim()))
+    }
+
+    fun loadProfile() = perform { applyProfile(repository.profile()) }
+
+    internal fun uploadProfileMedia(slot: ProfileMediaSlot, uri: Uri) = perform {
+        applyProfile(repository.uploadProfileMedia(slot, uri))
+    }
+
+    internal fun removeProfileMedia(slot: ProfileMediaSlot) = perform {
+        applyProfile(repository.removeProfileMedia(slot))
+    }
+
+    private fun applyProfile(profile: UserDto) {
+        mutableState.value = mutableState.value.copy(
+            profile = profile,
+            profileRequired = profileRequired(profile.username, profile.displayName),
+            username = profile.username,
+            displayName = profile.displayName,
+            notice = null,
+        )
     }
 
     fun searchUsers() = perform {
@@ -114,16 +139,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun selectChat(chatId: String?) {
         mutableState.value = mutableState.value.copy(selectedChatId = chatId, notice = null)
         if (chatId != null) viewModelScope.launch {
-            runCatching { withContext(Dispatchers.IO) { repository.catchUp(chatId) } }
-                .onFailure { setNotice(friendlyError(it)) }
+            try {
+                withContext(Dispatchers.IO) { repository.catchUp(chatId) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (mutableState.value.selectedChatId == chatId) setNotice(friendlyError(error))
+            }
         }
     }
 
     fun messages(chatId: String) = repository.observeMessages(chatId)
 
-    fun send(chatId: String, text: String) = perform(clearNotice = true) {
-        withContext(Dispatchers.IO) { repository.sendMessage(chatId, text) }
-        // The durable WorkManager outbox owns retries; foreground UI never invents a server acknowledgement.
+    suspend fun assistantAccessToken(): String = repository.socketAccessToken()
+
+    fun send(chatId: String, text: String, onQueued: () -> Unit) = perform(clearNotice = true) {
+        repository.sendMessage(chatId, text)
+        // Clear the draft only after the durable WorkManager outbox accepted it.
+        withContext(Dispatchers.Main.immediate) { onQueued() }
     }
 
     fun retry(clientMessageId: String) = perform {
@@ -158,6 +191,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
+    private fun profileRequired(username: String, displayName: String): Boolean =
+        username.isBlank() || defaultUsername.matches(username) && displayName == "Пользователь NOVA"
 
     private fun setNotice(text: String) { mutableState.value = mutableState.value.copy(notice = text) }
 

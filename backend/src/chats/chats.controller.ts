@@ -11,6 +11,7 @@ const publicUserSchema = {
   required: ['id', 'username', 'displayName'],
   properties: {
     id: { type: 'string', format: 'uuid' }, username: { type: 'string' }, displayName: { type: 'string' },
+    avatarUrl: { type: 'string' }, avatarContentType: { type: 'string' },
   },
 };
 const chatSchema = {
@@ -49,7 +50,12 @@ export class ChatsController {
   @ApiOperation({ operationId: 'createDirectChat' })
   @ApiResponse({ status: 200, description: 'Existing or newly-created direct chat.', schema: chatSchema })
   @ApiResponse({ status: 403, description: 'Chat creation is not allowed.' })
-  direct(@Req() req: AuthenticatedRequest, @Body() body: CreateDirectChatDto) { return this.chats.createDirectChat(req.auth!.userId, body.userId); }
+  async direct(@Req() req: AuthenticatedRequest, @Body() body: CreateDirectChatDto) {
+    const userId = req.auth!.userId;
+    const result = await this.chats.createDirectChat(userId, body.userId);
+    if (result.created) this.realtime.emitChatCreated([userId, body.userId], result.chat.id);
+    return result.chat;
+  }
 
   @Get(':chatId/messages')
   @ApiOperation({ operationId: 'listMessages' })

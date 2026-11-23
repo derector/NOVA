@@ -1,0 +1,26 @@
+.dialog { width: min(42rem, calc(100% - 1.5rem)); max-height: calc(100dvh - 1.5rem); padding: clamp(.8rem, 3vw, 1.45rem); }
+.header, .controls, .composer { display: flex; align-items: center; gap: .65rem; }
+.header { justify-content: space-between; }
+.header h2, .header p { margin: 0; }
+.header p, .intro, .privacy { opacity: .8; }
+.controls { margin: .85rem 0; flex-wrap: wrap; }
+.controls label { display: flex; align-items: center; gap: .5rem; }
+.controls select, .composer textarea {
+  color: inherit; background: color-mix(in srgb, currentColor 8%, transparent); border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: .8rem; font: inherit; padding: .55rem .7rem;
+}
+.thread { display: flex; flex-direction: column; align-items: flex-start; gap: .7rem; overflow-y: auto; max-height: min(35dvh, 24rem); min-height: 4rem; overscroll-behavior: contain; }
+.thread article { border-radius: 1.15rem; padding: .65rem .85rem; max-width: 92%; overflow-wrap: anywhere; animation: assistantEnter .24s ease-out; }
+.thread article p { margin: 0; white-space: pre-wrap; }
+.reply { background: color-mix(in srgb, currentColor 10%, transparent); }
+.reply button { margin-top: .4rem; }
+.user { align-self: flex-end; background: color-mix(in srgb, var(--accent, #70e1c1) 22%, transparent); }
+.composer { margin-top: .6rem; flex-wrap: wrap; }
+.composer textarea { flex: 1 1 8rem; min-width: 0; min-height: 2.75rem; max-height: 6rem; resize: vertical; }
+.error { color: inherit; margin: .55rem 0; }
+.error:empty { display: none; }
+.audio { width: 100%; max-height: 2.6rem; }
+.audio[hidden] { display: none; }
+.privacy { font-size: .77rem; margin: .65rem 0 0; }
+@media (prefers-reduced-motion: reduce) { .thread article { animation: none; } }
+@keyframes assistantEnter { from { opacity: 0; transform: translateY(.35rem); } }

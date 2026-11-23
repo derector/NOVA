@@ -17,7 +17,7 @@ export class NovaApiError extends Error {
 
 function apiMessage(status: number, serverMessage?: string): string {
   if (status === 503) {
-    return 'Сервис доставки почты не настроен или временно недоступен. Код не был отправлен — попробуйте позже или проверьте конфигурацию backend.';
+    return 'Сервис временно недоступен. Попробуйте позже.';
   }
   if (status === 429) return 'Слишком много запросов. Подождите немного и повторите попытку.';
   if (status === 401) return 'Сессия истекла. Войдите ещё раз.';
@@ -54,16 +54,17 @@ export async function apiFetch<T>(
   options: RequestInit = {},
   accessToken?: string,
 ): Promise<T> {
+  const headers = new Headers(options.headers);
+  if (typeof options.body === 'string' && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
   let response: Response;
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...options,
       cache: 'no-store',
-      headers: {
-        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-        ...options.headers,
-      },
+      headers,
     });
   } catch {
     throw new NovaApiError({ status: 0, message: apiMessage(0) });

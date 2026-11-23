@@ -1,0 +1,11 @@
+{
+  "name": "nova-download",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "engines": { "node": "22.x" },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test"
+  }
+}

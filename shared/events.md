@@ -29,6 +29,12 @@ The authoritative create/send operation is REST `POST /api/v1/chats/{chatId}/mes
 
 ### Server to client
 
+`chat:new` is sent to the authenticated sockets of both participants after a direct chat first commits. Clients refresh their chat list, then join the new chat and catch up through REST. Existing chats do not emit this event again.
+
+```json
+{"chatId":"uuid"}
+```
+
 `message:new`
 
 ```json

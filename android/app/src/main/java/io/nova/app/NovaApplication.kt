@@ -7,6 +7,7 @@ import io.nova.app.data.realtime.RealtimeClient
 import io.nova.app.data.remote.NovaApi
 import io.nova.app.data.repo.NovaRepository
 import io.nova.app.data.security.SessionStore
+import io.nova.app.feature.updates.scheduleUpdateNotifications
 
 class NovaApplication : Application() {
     lateinit var container: AppContainer
@@ -19,6 +20,7 @@ class NovaApplication : Application() {
             throw IllegalStateException("Release requires NOVA_API_BASE_URL with HTTPS")
         }
         container = AppContainer(this, baseUrl)
+        scheduleUpdateNotifications(this)
     }
 }
 

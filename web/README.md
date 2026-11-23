@@ -26,3 +26,7 @@ npm run build
 ```
 
 REST DTO, `Idempotency-Key`, `after` cursor и Socket.IO события описаны в `../shared/openapi.yaml` и `../shared/events.md`. REST сохраняет сообщения и выполняет catch-up после reconnect; Socket.IO используется для real-time обновлений и не гарантирует replay во время отключения.
+
+Для production установите `NEXT_PUBLIC_NOVA_API_BASE_URL` в публичный HTTPS origin NOVA API и добавьте домен веб-клиента в `CORS_ORIGINS` API. Realtime и сигналинг звонков используют Socket.IO на API.
+
+Для индексации укажите HTTPS origin сайта в `NEXT_PUBLIC_NOVA_SITE_URL`, а при проверке владения доменом через HTML-тег Google задайте `NOVA_GOOGLE_SITE_VERIFICATION`. Затем отправьте `/sitemap.xml` опубликованного домена в Search Console. `NEXT_PUBLIC_NOVA_DOWNLOAD_URL` добавляет ссылку на отдельный сайт Android.

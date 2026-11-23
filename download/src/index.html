@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101722">
+  <title>Скачать NOVA для Android</title>
+  <meta name="description" content="Страница загрузки мессенджера NOVA для Android. Здесь публикуются подписанные APK, сведения о версии и инструкция по установке.">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="ru_RU">
+  <meta property="og:title" content="Скачать NOVA для Android">
+  <meta property="og:description" content="Подписанный APK мессенджера NOVA, сведения о версии и инструкция по установке.">
+  <!--SEO-->
+  <link rel="icon" href="/nova.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/release.js" defer></script>
+</head>
+<body>
+  <a href="#main" class="skip">К содержанию</a>
+  <header class="wrap site-header">
+    <a class="brand" href="/" aria-label="NOVA, страница загрузки">
+      <img src="/nova.svg" alt="" width="34" height="34">
+      <span>NOVA</span>
+    </a>
+    <nav aria-label="Навигация сайта">
+      <a href="#install">Установка</a>
+      <!--WEB_LINK-->
+    </nav>
+  </header>
+  <main id="main" class="wrap">
+    <div class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">МЕССЕНДЖЕР NOVA</p>
+        <h1>NOVA <span>для Android</span></h1>
+        <p class="lede">Личные чаты в приложении NOVA. Зарегистрируйтесь по email, найдите собеседника по имени пользователя и начните переписку.</p>
+        <section class="release glass" aria-labelledby="release-title">
+          <h2 id="release-title">Версия для установки</h2>
+          <p id="release-status" role="status">Проверяем публикацию APK…</p>
+          <div id="release-actions" class="release-actions" hidden>
+            <a id="apk-link" class="button button-primary">Скачать APK <span aria-hidden="true">↓</span></a>
+            <a class="button button-secondary" href="#install">Как установить</a>
+          </div>
+          <button id="release-retry" class="button button-secondary" type="button" hidden>Проверить ещё раз</button>
+          <details id="release-checks" hidden>
+            <summary>Проверка файла</summary>
+            <dl>
+              <dt>Пакет</dt><dd><code id="release-package"></code></dd>
+              <dt>SHA-256 APK</dt><dd><code id="release-digest"></code></dd>
+              <dt>SHA-256 сертификата</dt><dd><code id="release-signer"></code></dd>
+            </dl>
+          </details>
+          <noscript><p>Включите JavaScript, чтобы проверить публикацию подписанного APK.</p></noscript>
+        </section>
+      </div>
+      <div class="brand-art" aria-hidden="true">
+        <div class="orbit orbit-wide"></div>
+        <div class="orbit orbit-narrow"></div>
+        <div class="icon-halo"><img src="/nova.svg" alt="" width="236" height="236"></div>
+      </div>
+    </div>
+
+    <!--APK_GALLERY-->
+    <section id="install" class="install" aria-labelledby="install-title">
+      <div>
+        <p class="eyebrow">ANDROID 8.0 И НОВЕЕ</p>
+        <h2 id="install-title">Как установить NOVA</h2>
+      </div>
+      <ol>
+        <li class="glass"><h3>Скачайте APK</h3><p>Сохраните подписанный файл с этой страницы.</p></li>
+        <li class="glass"><h3>Откройте файл</h3><p>Android запустит установщик. Если система спросит разрешение, разрешите установку для браузера или файлового менеджера, из которого открыли APK.</p></li>
+        <li class="glass"><h3>Создайте аккаунт</h3><p>Откройте NOVA, выберите имя пользователя и подтвердите адрес электронной почты.</p></li>
+      </ol>
+    </section>
+  </main>
+  <footer class="wrap site-footer">
+    <a class="brand" href="/" aria-label="NOVA, страница загрузки"><img src="/nova.svg" alt="" width="28" height="28"><span>NOVA</span></a>
+    <a href="#install">Инструкция по установке</a>
+  </footer>
+</body>
+</html>

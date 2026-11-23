@@ -16,6 +16,12 @@ export class UpdateProfileDto {
   @MinLength(1)
   @MaxLength(80)
   displayName?: string;
+
+  @ApiPropertyOptional({ maxLength: 240 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(240)
+  bio?: string;
 }
 
 export class SearchUsersQuery {

@@ -5,7 +5,7 @@ import com.google.gson.annotations.SerializedName
 internal data class EmailRequest(val email: String)
 internal data class VerifyRequest(val email: String, val code: String)
 internal data class RefreshRequest(val refreshToken: String)
-internal data class ProfileUpdateRequest(val username: String, val displayName: String)
+internal data class ProfileUpdateRequest(val username: String, val displayName: String, val bio: String? = null)
 internal data class DirectChatRequest(val userId: String)
 internal data class SendMessageRequest(val text: String)
 
@@ -14,13 +14,24 @@ data class UserDto(
     val email: String,
     val username: String,
     val displayName: String,
+    val bio: String? = null,
+    val avatarUrl: String? = null,
+    val avatarContentType: String? = null,
+    val coverUrl: String? = null,
+    val coverContentType: String? = null,
 )
 
 data class PublicUserDto(
     val id: String,
     val username: String,
     val displayName: String,
+    val avatarUrl: String? = null,
+    val avatarContentType: String? = null,
 )
+
+internal enum class ProfileMediaSlot(val path: String) {
+    AVATAR("avatar"), COVER("cover"),
+}
 
 internal data class SessionDto(
     val accessToken: String,

@@ -1,5 +1,6 @@
 import org.gradle.api.GradleException
 import java.io.File
+import java.net.URI
 
 plugins {
     id("com.android.application")
@@ -14,6 +15,15 @@ val releaseStoreFile = providers.environmentVariable("NOVA_RELEASE_STORE_FILE").
 val releaseStorePassword = providers.environmentVariable("NOVA_RELEASE_STORE_PASSWORD").orNull
 val releaseKeyAlias = providers.environmentVariable("NOVA_RELEASE_KEY_ALIAS").orNull
 val releaseKeyPassword = providers.environmentVariable("NOVA_RELEASE_KEY_PASSWORD").orNull
+val updateManifestUrl = providers.environmentVariable("NOVA_UPDATE_MANIFEST_URL").getOrElse("")
+if (updateManifestUrl.isNotEmpty()) {
+    val url = runCatching { URI(updateManifestUrl) }.getOrNull()
+    if (url == null || url.scheme != "https" || url.host.isNullOrBlank() || url.userInfo != null ||
+        url.fragment != null || '"' in updateManifestUrl || '\\' in updateManifestUrl
+    ) {
+        throw GradleException("NOVA_UPDATE_MANIFEST_URL must be a public HTTPS URL.")
+    }
+}
 
 android {
     namespace = "io.nova.app"
@@ -23,10 +33,11 @@ android {
         applicationId = "io.nova.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "API_BASE_URL", "\"$debugApiBase\"")
+        buildConfigField("String", "UPDATE_MANIFEST_URL", "\"$updateManifestUrl\"")
     }
 
     signingConfigs {

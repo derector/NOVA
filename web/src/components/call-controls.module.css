@@ -1,0 +1,104 @@
+.controls {
+  min-width: 0;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.menu {
+  position: relative;
+}
+
+.menu summary {
+  list-style: none;
+}
+
+.menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.menuOptions {
+  position: absolute;
+  z-index: 21;
+  inset: calc(100% + 0.4rem) 0 auto auto;
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  background: var(--surface);
+  box-shadow: 0 0.5rem 1.5rem #0004;
+}
+
+.panel {
+  position: fixed;
+  z-index: 20;
+  top: max(5rem, env(safe-area-inset-top));
+  right: max(0.75rem, env(safe-area-inset-right));
+  width: min(26rem, calc(100% - 1.5rem));
+  max-height: calc(100dvh - 6rem);
+  overflow-y: auto;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1.4rem;
+  background: var(--surface);
+  color: var(--text);
+  backdrop-filter: blur(24px) saturate(125%);
+  box-shadow: 0 1rem 3rem #0005;
+}
+
+.panel h2 {
+  margin: 0.15rem 0 0.75rem;
+  font-size: 1.15rem;
+  overflow-wrap: anywhere;
+}
+
+.status {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.video {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.video video {
+  width: 100%;
+  max-height: min(35dvh, 16rem);
+  border-radius: 0.8rem;
+  object-fit: contain;
+  background: #101722;
+}
+
+.video video + video {
+  width: min(100%, 7rem);
+  justify-self: end;
+}
+
+.end {
+  padding: 0.55rem 0.85rem;
+  min-height: 2.75rem;
+  border: 1px solid #f58291;
+  border-radius: 0.85rem;
+  background: #7e273c;
+  color: white;
+  font: inherit;
+}
+
+.end:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

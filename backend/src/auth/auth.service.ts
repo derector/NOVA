@@ -53,8 +53,8 @@ export class AuthService {
       await this.mailer.sendMail({
         from,
         to: email,
-        subject: 'Your NOVA sign-in code',
-        text: `Your NOVA sign-in code is ${code}. It expires in ${ttlMinutes} minutes. If you did not request this code, you can ignore this message.`,
+        subject: 'Код подтверждения NOVA',
+        text: `Код подтверждения NOVA: ${code}. Он действителен ${ttlMinutes} мин. Если вы не запрашивали код, проигнорируйте это письмо.`,
       });
     } catch {
       await this.db.query('UPDATE otp_challenges SET consumed_at = now() WHERE email = $1 AND code_hash = $2', [email, digest]);
@@ -160,12 +160,9 @@ export class AuthService {
   private async findOrCreateUser(client: PoolClient, email: string): Promise<UserResponse> {
     const existing = await client.query<UserRow>('SELECT id, email, username, display_name FROM users WHERE email = $1', [email]);
     if (existing.rows[0]) return this.toUser(existing.rows[0]);
-    const local = email.split('@')[0] ?? 'nova_user';
-    const base = local.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '').slice(0, 22);
-    const prefix = base.length >= 3 ? base : `user${base}`.slice(0, 22);
-    const displayName = (local || 'NOVA user').slice(0, 80);
+    const displayName = 'Пользователь NOVA';
     for (let attempt = 0; attempt < 5; attempt++) {
-      const username = `${prefix}_${randomBytes(3).toString('hex')}`.slice(0, 32);
+      const username = `nova_${randomBytes(6).toString('hex')}`;
       const inserted = await client.query<UserRow>(
         `INSERT INTO users(email, username, display_name) VALUES ($1, $2, $3)
          ON CONFLICT DO NOTHING RETURNING id, email, username, display_name`, [email, username, displayName],

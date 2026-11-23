@@ -114,10 +114,45 @@ paths:
               properties:
                 username: {type: string, minLength: 3, maxLength: 32, pattern: '^[A-Za-z0-9_]+$'}
                 displayName: {type: string, minLength: 1, maxLength: 80}
+                bio: {type: string, maxLength: 240}
       responses:
         '200': {description: Updated private profile, including the account owner's email, content: {application/json: {schema: {$ref: '#/components/schemas/User'}}}}
         '409': {description: Username is already taken}
         '401': {description: Missing or invalid access token}
+  /api/v1/users/me/media/{slot}:
+    parameters:
+      - {name: slot, in: path, required: true, schema: {type: string, enum: [avatar, cover]}}
+    post:
+      operationId: uploadProfileMedia
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: {type: string, format: binary, description: 'JPEG, PNG, WebP, GIF, MP4 or WebM, up to 8 MiB'}
+      responses:
+        '201': {description: Updated owner profile, content: {application/json: {schema: {$ref: '#/components/schemas/User'}}}}
+        '413': {description: File exceeds the size limit}
+        '415': {description: Unsupported file format}
+    delete:
+      operationId: removeProfileMedia
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Updated owner profile, content: {application/json: {schema: {$ref: '#/components/schemas/User'}}}}
+  /api/v1/users/media/{id}:
+    get:
+      operationId: getProfileMedia
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Public by-link image or video bytes}
+        '206': {description: Partial content for a single byte range}
+        '404': {description: Media removed or unknown}
+        '416': {description: Unsatisfiable or unsupported range}
   /api/v1/users/search:
     get:
       operationId: searchUsers
@@ -223,6 +258,11 @@ components:
         email: {type: string, format: email}
         username: {type: string}
         displayName: {type: string}
+        bio: {type: string}
+        avatarUrl: {type: [string, 'null']}
+        avatarContentType: {type: [string, 'null']}
+        coverUrl: {type: [string, 'null']}
+        coverContentType: {type: [string, 'null']}
     PublicUser:
       type: object
       description: Public profile fields; does not contain the account email.
@@ -231,6 +271,8 @@ components:
         id: {type: string, format: uuid}
         username: {type: string}
         displayName: {type: string}
+        avatarUrl: {type: string}
+        avatarContentType: {type: string}
     Chat:
       type: object
       required: [id, participant, updatedAt]

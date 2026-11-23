@@ -1,14 +1,16 @@
-export interface NovaUser {
-  id: string;
-  email: string;
-  username: string;
-  displayName: string;
-}
-
 export interface NovaPublicUser {
   id: string;
   username: string;
   displayName: string;
+  bio?: string | null;
+  avatarUrl?: string | null;
+  avatarContentType?: string | null;
+  coverUrl?: string | null;
+  coverContentType?: string | null;
+}
+
+export interface NovaUser extends NovaPublicUser {
+  email: string;
 }
 
 export interface NovaChat {

@@ -7,6 +7,7 @@ import io.nova.app.data.repo.NovaRepository
 import io.socket.client.Ack
 import io.socket.client.IO
 import io.socket.client.Socket
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -15,21 +16,23 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
 
 class RealtimeClient(private val repository: NovaRepository, private val baseUrl: String) {
     private val gson = Gson()
-    private var socket: Socket? = null
+    @Volatile private var socket: Socket? = null
+    private val joinedChats = ConcurrentHashMap.newKeySet<String>()
     private var scope: CoroutineScope? = null
     private var chatsJob: Job? = null
 
     @Synchronized
     fun start() {
         if (socket?.connected() == true || scope != null) return
-        if (repository.sessionStore.read() == null) return
+        val account = repository.sessionStore.read()?.userId ?: return
         val activeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         scope = activeScope
         chatsJob = activeScope.launch {
-            runCatching { repository.syncChats() }.onFailure { Log.w(TAG, "Initial REST sync failed", it) }
+            syncChats()
             repository.observeChats().collectLatest { chats ->
                 if (socket?.connected() == true) chats.forEach { join(it.id) }
             }
@@ -46,11 +49,15 @@ class RealtimeClient(private val repository: NovaRepository, private val baseUrl
                     timeout = 15_000
                 }
                 val connection = IO.socket(baseUrl.trimEnd('/'), options)
-                socket = connection
                 connection.on(Socket.EVENT_CONNECT) {
+                    joinedChats.clear()
                     activeScope.launch {
                         repository.chatIds().forEach { join(it) }
+                        syncChats()
                     }
+                }
+                connection.on("chat:new") {
+                    activeScope.launch { syncChats() }
                 }
                 connection.on(Socket.EVENT_CONNECT_ERROR) { args ->
                     Log.w(TAG, "Socket connection failed: ${args.firstOrNull()}")
@@ -58,10 +65,15 @@ class RealtimeClient(private val repository: NovaRepository, private val baseUrl
                 connection.on("message:new") { args ->
                     val payload = args.firstOrNull() as? JSONObject ?: return@on
                     runCatching { gson.fromJson(payload.toString(), MessageDto::class.java) }
-                        .onSuccess { message -> activeScope.launch { repository.acceptSocketMessage(message) } }
+                        .onSuccess { message -> activeScope.launch { repository.acceptSocketMessage(message, account) } }
                         .onFailure { Log.w(TAG, "Ignoring malformed message:new event", it) }
                 }
-                connection.connect()
+                synchronized(this@RealtimeClient) {
+                    if (scope == activeScope) {
+                        socket = connection
+                        connection.connect()
+                    }
+                }
             }.onFailure { Log.w(TAG, "Socket setup failed", it) }
         }
     }
@@ -70,6 +82,7 @@ class RealtimeClient(private val repository: NovaRepository, private val baseUrl
     fun stop() {
         chatsJob?.cancel()
         chatsJob = null
+        joinedChats.clear()
         socket?.disconnect()
         socket?.off()
         socket = null
@@ -77,16 +90,33 @@ class RealtimeClient(private val repository: NovaRepository, private val baseUrl
         scope = null
     }
 
+    private suspend fun syncChats() {
+        try {
+            repository.syncChats()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w(TAG, "REST chat sync failed", error)
+        }
+    }
+
     private fun join(chatId: String) {
         val current = socket?.takeIf { it.connected() } ?: return
+        if (!joinedChats.add(chatId)) return
         current.emit("chat:join", JSONObject().put("chatId", chatId), Ack { args ->
             val ack = args.firstOrNull() as? JSONObject
-            if (ack?.optBoolean("error", false) == true || ack?.has("error") == true) {
+            if (ack?.has("error") == true) {
+                joinedChats.remove(chatId)
                 Log.w(TAG, "chat:join rejected for an authorized chat")
             } else {
                 scope?.launch {
-                    runCatching { repository.catchUp(chatId) }
-                        .onFailure { Log.w(TAG, "REST catch-up failed for $chatId", it) }
+                    try {
+                        repository.catchUp(chatId)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        Log.w(TAG, "REST catch-up failed for $chatId", error)
+                    }
                 }
             }
         })

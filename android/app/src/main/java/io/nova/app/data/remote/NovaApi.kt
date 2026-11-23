@@ -7,10 +7,13 @@ import okhttp3.Callback
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
@@ -47,8 +50,24 @@ internal class NovaApi(baseUrl: String) {
 
     suspend fun me(token: String): UserDto = decode(execute("GET", "api/v1/users/me", token = token, accepted = setOf(200)))
 
-    suspend fun updateProfile(token: String, username: String, displayName: String): UserDto = decode(
-        execute("PATCH", "api/v1/users/me", ProfileUpdateRequest(username, displayName), token, setOf(200)),
+    suspend fun updateProfile(token: String, username: String, displayName: String, bio: String? = null): UserDto = decode(
+        execute("PATCH", "api/v1/users/me", ProfileUpdateRequest(username, displayName, bio), token, setOf(200)),
+    )
+
+    suspend fun uploadProfileMedia(token: String, slot: ProfileMediaSlot, file: File): UserDto {
+        val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("file", "profile-media", file.asRequestBody("application/octet-stream".toMediaType()))
+            .build()
+        val request = Request.Builder()
+            .url(endpoint("api/v1/users/me/media/${slot.path}"))
+            .header("Authorization", "Bearer $token")
+            .post(body)
+            .build()
+        return decode(execute(request, setOf(200, 201)))
+    }
+
+    suspend fun removeProfileMedia(token: String, slot: ProfileMediaSlot): UserDto = decode(
+        execute("DELETE", "api/v1/users/me/media/${slot.path}", token = token, accepted = setOf(200)),
     )
 
     suspend fun searchUsers(token: String, username: String): List<PublicUserDto> {

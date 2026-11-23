@@ -10,6 +10,8 @@ const userSchema = {
   properties: {
     id: { type: 'string', format: 'uuid' }, email: { type: 'string', format: 'email' },
     username: { type: 'string' }, displayName: { type: 'string' },
+    bio: { type: 'string' }, avatarUrl: { type: 'string', nullable: true }, avatarContentType: { type: 'string', nullable: true },
+    coverUrl: { type: 'string', nullable: true }, coverContentType: { type: 'string', nullable: true },
   },
 };
 const publicUserSchema = {
@@ -17,6 +19,7 @@ const publicUserSchema = {
   required: ['id', 'username', 'displayName'],
   properties: {
     id: { type: 'string', format: 'uuid' }, username: { type: 'string' }, displayName: { type: 'string' },
+    avatarUrl: { type: 'string' }, avatarContentType: { type: 'string' },
   },
 };
 

@@ -3,9 +3,9 @@ import { DatabaseService } from '../database/database.module';
 import { decideIdempotency } from '../common/security.helpers';
 import type { PoolClient } from 'pg';
 
-interface PublicUserRow { id: string; username: string; display_name: string }
+interface PublicUserRow { id: string; username: string; display_name: string; avatar_id?: string; avatar_type?: string }
 interface MessageRow { id: string; client_message_id: string; chat_id: string; sender_id: string; text: string; created_at: Date | string; delivered_at: Date | string | null }
-type PublicUser = { id: string; username: string; displayName: string };
+type PublicUser = { id: string; username: string; displayName: string; avatarUrl?: string; avatarContentType?: string };
 type ChatDto = { id: string; participant: PublicUser; updatedAt: string };
 export type MessageDto = { id: string; clientMessageId: string; chatId: string; senderId: string; text: string; createdAt: string; deliveredAt: string | null };
 
@@ -14,27 +14,30 @@ export class ChatsService {
   constructor(private readonly db: DatabaseService) {}
 
   async listChats(userId: string): Promise<ChatDto[]> {
-    const result = await this.db.query<{ id: string; peer_id: string; username: string; display_name: string; updated_at: Date | string }>(
-      `SELECT c.id, peer.id AS peer_id, peer.username, peer.display_name, c.updated_at
+    const result = await this.db.query<{ id: string; peer_id: string; username: string; display_name: string; avatar_id?: string; avatar_type?: string; updated_at: Date | string }>(
+      `SELECT c.id, peer.id AS peer_id, peer.username, peer.display_name, a.id AS avatar_id, a.content_type AS avatar_type, c.updated_at
          FROM chats c
          JOIN chat_members own ON own.chat_id = c.id AND own.user_id = $1
          JOIN chat_members other ON other.chat_id = c.id AND other.user_id <> $1
          JOIN users peer ON peer.id = other.user_id
+         LEFT JOIN profile_media a ON a.owner_id = peer.id AND a.slot = 'avatar'
         ORDER BY c.updated_at DESC, c.id`, [userId],
     );
     return result.rows.map((row) => ({
       id: row.id,
-      participant: { id: row.peer_id, username: row.username, displayName: row.display_name },
+      participant: this.publicUser({ ...row, id: row.peer_id }),
       updatedAt: this.asIso(row.updated_at),
     }));
   }
 
-  async createDirectChat(userId: string, otherUserId: string): Promise<ChatDto> {
+  async createDirectChat(userId: string, otherUserId: string): Promise<{ chat: ChatDto; created: boolean }> {
     if (userId === otherUserId) throw new ForbiddenException('Direct chat with yourself is not allowed');
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
-      const users = await client.query<PublicUserRow>('SELECT id, username, display_name FROM users WHERE id = ANY($1::uuid[])', [[userId, otherUserId]]);
+      const users = await client.query<PublicUserRow>(`SELECT u.id, u.username, u.display_name, a.id AS avatar_id, a.content_type AS avatar_type
+         FROM users u LEFT JOIN profile_media a ON a.owner_id = u.id AND a.slot = 'avatar'
+        WHERE u.id = ANY($1::uuid[])`, [[userId, otherUserId]]);
       if (users.rows.length !== 2) throw new ForbiddenException('Chat creation is not allowed');
       const sorted = [userId, otherUserId].sort();
       const directKey = `${sorted[0]}:${sorted[1]}`;
@@ -45,7 +48,7 @@ export class ChatsService {
       const updated = await client.query<{ updated_at: Date | string }>('SELECT updated_at FROM chats WHERE id = $1', [row.id]);
       await client.query('COMMIT');
       const participant = users.rows.find((candidate) => candidate.id === otherUserId)!;
-      return { id: row.id, participant: this.publicUser(participant), updatedAt: this.asIso(updated.rows[0].updated_at) };
+      return { chat: { id: row.id, participant: this.publicUser(participant), updatedAt: this.asIso(updated.rows[0].updated_at) }, created: Boolean(inserted.rowCount) };
     } catch (error) {
       try { await client.query('ROLLBACK'); } catch { /* already closed */ }
       throw error;
@@ -116,7 +119,10 @@ export class ChatsService {
     const result = await client.query('SELECT 1 FROM chat_members WHERE chat_id = $1 AND user_id = $2', [chatId, userId]);
     return (result.rowCount ?? 0) > 0;
   }
-  private publicUser(row: PublicUserRow): PublicUser { return { id: row.id, username: row.username, displayName: row.display_name }; }
+  private publicUser(row: PublicUserRow): PublicUser {
+    const profile = { id: row.id, username: row.username, displayName: row.display_name };
+    return row.avatar_id ? { ...profile, avatarUrl: `/api/v1/users/media/${row.avatar_id}`, avatarContentType: row.avatar_type } : profile;
+  }
   private message(row: MessageRow): MessageDto {
     return {
       id: row.id, clientMessageId: row.client_message_id, chatId: row.chat_id, senderId: row.sender_id,
