@@ -33,7 +33,7 @@ APK включает adaptive и round launcher icon NOVA. При проверк
 | Веб-клиент NOVA | `web` (Next.js, Node 22) | `NEXT_PUBLIC_NOVA_API_BASE_URL`, `NEXT_PUBLIC_NOVA_SITE_URL`, `NEXT_PUBLIC_NOVA_DOWNLOAD_URL` |
 | Сайт загрузки NOVA | `download` (Other, Node 22) | `NOVA_DOWNLOAD_ORIGIN`, `NOVA_MESSENGER_ORIGIN`, `NOVA_UPDATE_MANIFEST_URL`, `NOVA_RELEASE_CERT_SHA256` |
 
-Запускайте NestJS на хосте с постоянным процессом и Socket.IO через HTTPS/WSS. Настройте `CORS_ORIGINS` точными origin веб-клиента, SMTP и отдельную PostgreSQL. Перед подключением основного домена проверьте регистрацию, переписку и звонки между двумя аккаунтами. Для звонков через сети с ограничениями NAT настройте TURN. [Звонки в NOVA](browser-calls.md)
+Запускайте NestJS на хосте с постоянным процессом и Socket.IO через HTTPS/WSS. Готовый образ можно собрать из [`backend/Dockerfile`](../backend/Dockerfile). Настройте `CORS_ORIGINS` точными origin веб-клиента, SMTP и отдельную PostgreSQL. Перед подключением основного домена проверьте регистрацию, переписку и звонки между двумя аккаунтами. Для звонков через сети с ограничениями NAT настройте TURN. [Звонки в NOVA](browser-calls.md)
 
 У обоих сайтов есть `robots.txt` и `sitemap.xml`. После подключения доменов добавьте оба публичных адреса как ресурсы Google Search Console, подтвердите владение и отправьте их sitemap. Приватные чаты остаются за входом. [Документация Google Search Central](https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap)
 
@@ -47,7 +47,7 @@ APK включает adaptive и round launcher icon NOVA. При проверк
 - Android debug APK и JVM unit tests, с загрузкой APK как artifact;
 - отдельный release job по version tag, защищённый GitHub Environment.
 
-Workflow опубликован в [GitHub-репозитории NOVA](https://github.com/derector/NOVA). Run [43705547258](https://github.com/derector/NOVA/actions/runs/43705547258) прошёл после изменения Android icon resources: PostgreSQL migration и database health smoke, backend checks, web lint/typecheck/build/audit, Android debug assembly/unit tests и artifact upload. Signed release job не запускался, поскольку его условие — version tag `v…`; для него также требуются production HTTPS API URL и настроенный signing keystore в GitHub Environment.
+Сборка [45185512487](https://github.com/derector/NOVA/actions/runs/45185512487) проверила версию 0.2.0, миграции PostgreSQL, оба сайта, Android и unit-тесты. Тестовый APK доступен в [артефактах GitHub Actions](https://github.com/derector/NOVA/actions/runs/45185512487/artifacts/14824305484). Подписанная релизная сборка запускается с тегом `v…`, публичным HTTPS API и ключом в GitHub Environment.
 
 ## Подписанный release APK
 
