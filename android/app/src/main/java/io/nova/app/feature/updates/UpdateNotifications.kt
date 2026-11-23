@@ -14,7 +14,9 @@ import androidx.core.content.ContextCompat
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -26,6 +28,8 @@ import kotlinx.coroutines.CancellationException
 
 internal const val UPDATE_CHANNEL_ID = "nova-app-updates"
 private const val UPDATE_NOTIFICATION_ID = 1101
+private val updateNotificationLock = Any()
+private val connectedNetwork = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
 
 internal fun scheduleUpdateNotifications(context: Context) {
     if (!UpdateRepository.configured) return
@@ -34,11 +38,23 @@ internal fun scheduleUpdateNotifications(context: Context) {
         NotificationChannel(UPDATE_CHANNEL_ID, "Обновления NOVA", NotificationManager.IMPORTANCE_DEFAULT),
     )
     val request = PeriodicWorkRequestBuilder<UpdateNotificationWorker>(4, TimeUnit.HOURS, 1, TimeUnit.HOURS)
-        .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+        .setConstraints(connectedNetwork)
         .build()
     WorkManager.getInstance(context).enqueueUniquePeriodicWork(
         UPDATE_CHANNEL_ID,
         ExistingPeriodicWorkPolicy.KEEP,
+        request,
+    )
+}
+
+internal fun checkForUpdateNotification(context: Context) {
+    if (!UpdateRepository.configured || !updateNotificationsEnabled(context)) return
+    val request = OneTimeWorkRequestBuilder<UpdateNotificationWorker>()
+        .setConstraints(connectedNetwork)
+        .build()
+    WorkManager.getInstance(context).enqueueUniqueWork(
+        "nova-push-update-check",
+        ExistingWorkPolicy.KEEP,
         request,
     )
 }
@@ -89,14 +105,17 @@ class UpdateNotificationWorker(context: Context, parameters: WorkerParameters) :
             .setContentText("Версия ${release.versionName} готова к скачиванию в приложении")
             .setContentIntent(openApp)
             .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .build()
-        if (updateNotificationsEnabled(context)) {
-            try {
-                NotificationManagerCompat.from(context).notify(UPDATE_NOTIFICATION_ID, notification)
-                prefs.edit().putInt("notified_version", release.versionCode).apply()
-            } catch (_: SecurityException) {
-                return Result.success()
+        synchronized(updateNotificationLock) {
+            if (release.versionCode > prefs.getInt("notified_version", 0) && updateNotificationsEnabled(context)) {
+                try {
+                    NotificationManagerCompat.from(context).notify(UPDATE_NOTIFICATION_ID, notification)
+                    prefs.edit().putInt("notified_version", release.versionCode).apply()
+                } catch (_: SecurityException) {
+                    return Result.success()
+                }
             }
         }
         return Result.success()

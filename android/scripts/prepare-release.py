@@ -5,19 +5,13 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
-import re
 import shutil
-import subprocess
 from urllib.parse import urlsplit
 
-
-PACKAGE_NAME = "io.nova.app"
-MAX_APK_BYTES = 256 * 1024 * 1024
+from release_apk import MAX_APK_BYTES, PACKAGE_NAME, verify_release_apk
 
 
 def prepare_release(args: argparse.Namespace) -> None:
-    if not re.fullmatch(r"[0-9a-fA-F]{64}", args.signer_sha256):
-        raise ValueError("NOVA_RELEASE_CERT_SHA256 must be a SHA-256 certificate digest")
     public_url = urlsplit(args.apk_base_url)
     if (
         public_url.scheme != "https"
@@ -30,29 +24,11 @@ def prepare_release(args: argparse.Namespace) -> None:
     ):
         raise ValueError("NOVA_APK_PUBLIC_BASE_URL must be an HTTPS directory URL")
 
-    badging = subprocess.check_output([args.build_tools / "aapt", "dump", "badging", args.apk], text=True)
-    package = re.search(
-        r"^package: name='(.*?)' versionCode='([0-9]+)' versionName='(.*?)'", badging, re.MULTILINE
-    )
-    if not package or package[1] != PACKAGE_NAME or not re.search(r"^sdkVersion:'26'$", badging, re.MULTILINE):
-        raise ValueError("Unexpected APK package or minimum SDK")
-    version_code = int(package[2])
-    version_name = package[3]
-    if not re.fullmatch(r"[0-9][0-9A-Za-z.+-]{0,63}", version_name) or args.tag != f"v{version_name}":
+    version_code, version_name = verify_release_apk(args.apk, args.build_tools, args.signer_sha256)
+    if args.tag != f"v{version_name}":
         raise ValueError("The release tag must match the APK versionName")
-    if not (0 <= args.minimum_version_code <= version_code <= 2**31 - 1 and version_code > 0):
+    if not 0 <= args.minimum_version_code <= version_code:
         raise ValueError("Invalid minimum or current versionCode")
-
-    verification = subprocess.check_output(
-        [args.build_tools / "apksigner", "verify", "--verbose", "--print-certs", args.apk],
-        text=True,
-    )
-    signers = re.findall(r"^Signer #[0-9]+ certificate SHA-256 digest: ([0-9a-fA-F]{64})$", verification, re.MULTILINE)
-    pinned_signer = args.signer_sha256.lower()
-    if [signer.lower() for signer in signers] != [pinned_signer] or (
-        "Verified using v2 scheme (APK Signature Scheme v2): true" not in verification
-    ):
-        raise ValueError("APK must match the pinned NOVA certificate and have a valid v2 signature")
 
     apk_size = args.apk.stat().st_size
     if not 0 < apk_size <= MAX_APK_BYTES:
@@ -68,7 +44,7 @@ def prepare_release(args: argparse.Namespace) -> None:
         "apkUrl": f"{args.apk_base_url.rstrip('/')}/{apk_name}",
         "apkSha256": apk_hash,
         "apkSizeBytes": apk_size,
-        "signerSha256": pinned_signer,
+        "signerSha256": args.signer_sha256.lower(),
         "releasedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
 

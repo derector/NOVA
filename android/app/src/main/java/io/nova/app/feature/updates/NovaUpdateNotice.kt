@@ -98,6 +98,7 @@ internal class NovaUpdateViewModel(application: Application) : AndroidViewModel(
     }
 
     fun resume() {
+        NovaUpdatePush.syncSubscription(app)
         if (app.packageManager.canRequestPackageInstalls()) {
             mutableState.update { it.copy(installPermissionNeeded = false) }
         }
@@ -250,6 +251,7 @@ fun NovaUpdateSettings() {
     val prefs = remember(context) { context.getSharedPreferences("nova_update_notices", android.content.Context.MODE_PRIVATE) }
     val requestPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         notificationState.value = updateNotificationsEnabled(context)
+        NovaUpdatePush.syncSubscription(context.applicationContext)
     }
     LifecycleResumeEffect(context) {
         notificationState.value = updateNotificationsEnabled(context)

@@ -1,0 +1,64 @@
+name: Notify Android users of a published NOVA release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: Published versionCode from the signed release manifest
+        type: string
+        required: true
+      send:
+        description: Send to subscribers after verification
+        type: boolean
+        default: false
+
+concurrency:
+  group: nova-android-release-push
+  cancel-in-progress: false
+
+jobs:
+  signal:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Set up JDK
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
+      - name: Install pinned Android build tools
+        run: sdkmanager "build-tools;35.0.0"
+      - name: Obtain a short-lived Firebase API access token
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          token_format: access_token
+          project_id: ${{ vars.NOVA_FIREBASE_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.NOVA_FCM_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.NOVA_FCM_SERVICE_ACCOUNT }}
+          access_token_scopes: https://www.googleapis.com/auth/firebase.messaging
+          access_token_lifetime: 900s
+          create_credentials_file: false
+      - name: Verify published APK and request FCM delivery
+        env:
+          NOVA_FIREBASE_PROJECT_ID: ${{ vars.NOVA_FIREBASE_PROJECT_ID }}
+          NOVA_RELEASE_CERT_SHA256: ${{ vars.NOVA_RELEASE_CERT_SHA256 }}
+          NOVA_UPDATE_MANIFEST_URL: ${{ vars.NOVA_UPDATE_MANIFEST_URL }}
+          NOVA_FCM_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          RELEASE_VERSION_CODE: ${{ inputs.version_code }}
+          RELEASE_SEND: ${{ inputs.send }}
+        run: |
+          args=(--version-code "$RELEASE_VERSION_CODE" --build-tools "$ANDROID_HOME/build-tools/35.0.0")
+          if [[ "$RELEASE_SEND" == true ]]; then args+=(--send); fi
+          python3 android/scripts/send-release-push.py "${args[@]}"

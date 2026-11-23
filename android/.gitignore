@@ -3,3 +3,5 @@
 /.idea
 **/build
 *.iml
+/app/google-services.json
+/scripts/__pycache__/

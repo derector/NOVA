@@ -202,6 +202,13 @@ jobs:
           case "$NOVA_UPDATE_MANIFEST_URL" in https://*) ;; *) echo 'Set NOVA_UPDATE_MANIFEST_URL to the public HTTPS update manifest URL'; exit 1;; esac
           printf '%s' "$NOVA_RELEASE_KEY_BASE64" | base64 --decode > "$NOVA_RELEASE_STORE_FILE"
           chmod 600 "$NOVA_RELEASE_STORE_FILE"
+      - name: Materialize optional Android Firebase configuration
+        env:
+          NOVA_FIREBASE_ANDROID_JSON_BASE64: ${{ secrets.NOVA_FIREBASE_ANDROID_JSON_BASE64 }}
+        if: env.NOVA_FIREBASE_ANDROID_JSON_BASE64 != ''
+        run: |
+          umask 077
+          printf '%s' "$NOVA_FIREBASE_ANDROID_JSON_BASE64" | base64 --decode > app/google-services.json
       - name: Assemble signed release APK
         run: ./gradlew --no-daemon :app:assembleRelease
       - name: Verify APK and create the update manifest
@@ -222,6 +229,6 @@ jobs:
           path: android/app/build/nova-release/
           if-no-files-found: error
           retention-days: 30
-      - name: Remove temporary signing key
+      - name: Remove temporary signing key and Firebase configuration
         if: always()
-        run: rm -f "$NOVA_RELEASE_STORE_FILE"
+        run: rm -f "$NOVA_RELEASE_STORE_FILE" app/google-services.json

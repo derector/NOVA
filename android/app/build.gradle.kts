@@ -9,6 +9,10 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+if (file("google-services.json").isFile) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 val debugApiBase = providers.environmentVariable("NOVA_API_BASE_URL").orElse("http://10.0.2.2:3001").get()
 val releaseApiBase = providers.environmentVariable("NOVA_API_BASE_URL").orElse("").get()
 val releaseStoreFile = providers.environmentVariable("NOVA_RELEASE_STORE_FILE").orNull
@@ -116,6 +120,9 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("io.socket:socket.io-client:2.1.1")
+    implementation("com.google.firebase:firebase-messaging:25.1.3")
+    implementation("com.google.android.gms:play-services-base:18.9.0")
+    implementation("com.google.android.gms:play-services-tasks:18.4.0")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlin:kotlin-test:2.0.21")
