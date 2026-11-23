@@ -8,7 +8,7 @@ import { AuthService } from '../auth/auth.service';
 import { DatabaseService } from '../database/database.module';
 import { randomUUID } from 'node:crypto';
 import { callIceServers, DirectCalls, parseCallSignal } from './direct-calls';
-import type { CallEnd, CallParty, DirectCall } from './direct-calls';
+import type { CallEnd, CallKind, CallParty, DirectCall } from './direct-calls';
 
 const corsOrigins = (process.env.CORS_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean);
 interface ChatAction { chatId?: string }
@@ -50,8 +50,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   handleDisconnect(client: Socket): void {
     const party = this.callParty(client);
     if (!party) return;
-    const readySockets = this.server.sockets.adapter.rooms.get(this.callRoom(party.userId));
-    this.calls.disconnected(party, !readySockets?.size);
+    this.calls.disconnected(party, (kind) => Boolean(this.server.sockets.adapter.rooms.get(this.callRoom(party.userId, kind))?.size));
   }
 
   @SubscribeMessage('chat:join')
@@ -73,9 +72,14 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   }
 
   @SubscribeMessage('call:ready')
-  async readyForCalls(@ConnectedSocket() client: Socket) {
+  async readyForCalls(@ConnectedSocket() client: Socket, @MessageBody() payload?: { audioOnly?: boolean }) {
     if (!client.data.userId) return this.actionError('Войдите, чтобы принимать звонки.');
-    await client.join(this.callRoom(client.data.userId));
+    if (client.data.callReady) return { ok: true };
+    const audioOnly = payload?.audioOnly === true;
+    const rooms = [this.callRoom(client.data.userId, 'audio')];
+    if (!audioOnly) rooms.push(this.callRoom(client.data.userId, 'video'));
+    await client.join(rooms);
+    client.data.callAudioOnly = audioOnly;
     client.data.callReady = true;
     return { ok: true };
   }
@@ -85,7 +89,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     const party = this.callParty(client);
     const chatId = payload?.chatId;
     const kind = payload?.kind;
-    if (!party || !this.validUuid(chatId) || (kind !== 'audio' && kind !== 'video')) {
+    if (!party || !this.validUuid(chatId) || (kind !== 'audio' && kind !== 'video') || (kind === 'video' && party.audioOnly)) {
       return this.actionError('Звонок доступен только из личного чата.');
     }
     const now = Date.now();
@@ -105,7 +109,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     );
     if (!client.connected || result.rows.length !== 1) return this.actionError('Звонок доступен только участникам личного чата.');
     const { caller_name, callee_id } = result.rows[0];
-    const calleeRoom = this.callRoom(callee_id);
+    const calleeRoom = this.callRoom(callee_id, kind);
     if (!this.server.sockets.adapter.rooms.get(calleeRoom)?.size) {
       return this.actionError('Собеседник сейчас недоступен для звонка.');
     }
@@ -122,7 +126,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     const call = party && this.validUuid(callId) ? this.calls.accept(callId, party) : null;
     if (!call) return this.actionError('Этот звонок уже завершён или принят на другом устройстве.');
     this.server.to(call.caller.socketId).emit('call:accepted', { callId });
-    this.server.to(this.callRoom(call.calleeId)).except(client.id).emit('call:dismissed', { callId });
+    this.server.to(this.callRoom(call.calleeId, call.invite.kind)).except(client.id).emit('call:dismissed', { callId });
     return { ok: true, callId, iceServers: callIceServers() };
   }
 
@@ -155,13 +159,13 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   }
 
   private emitCallEnded(call: DirectCall, reason: CallEnd): void {
-    const audience = [call.caller.socketId, call.callee?.socketId ?? this.callRoom(call.calleeId)];
+    const audience = [call.caller.socketId, call.callee?.socketId ?? this.callRoom(call.calleeId, call.invite.kind)];
     this.server.to(audience).emit('call:ended', { callId: call.invite.id, reason });
   }
 
   private callParty(client: Socket): CallParty | null {
     return client.data.callReady && typeof client.data.userId === 'string'
-      ? { userId: client.data.userId, socketId: client.id }
+      ? { userId: client.data.userId, socketId: client.id, audioOnly: client.data.callAudioOnly === true }
       : null;
   }
   private async isMember(chatId: string, userId: string): Promise<boolean> {
@@ -170,7 +174,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   }
   private room(chatId: string): string { return `chat:${chatId}`; }
   private userRoom(userId: string): string { return `user:${userId}`; }
-  private callRoom(userId: string): string { return `ring:${userId}`; }
+  private callRoom(userId: string, kind: CallKind): string { return `ring:${kind}:${userId}`; }
   private validUuid(value: unknown): value is string { return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value); }
   private actionError(message: string) { return { ok: false, error: { code: 'FORBIDDEN', message, requestId: randomUUID() } }; }
 }

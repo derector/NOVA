@@ -9,6 +9,7 @@ type CallSignal = { description: Description } | { candidate: IceCandidate };
 export interface CallParty {
   userId: string;
   socketId: string;
+  audioOnly?: boolean;
 }
 
 export interface CallInvite {
@@ -88,7 +89,7 @@ export class DirectCalls {
   constructor(private readonly onEnded: (call: DirectCall, reason: CallEnd) => void) {}
 
   start(chatId: string, kind: CallKind, caller: CallParty, displayName: string, calleeId: string): DirectCall | null {
-    if (caller.userId === calleeId || this.reservedUsers.has(caller.userId) || this.reservedUsers.has(calleeId)) return null;
+    if (!this.supports(caller, kind) || caller.userId === calleeId || this.reservedUsers.has(caller.userId) || this.reservedUsers.has(calleeId)) return null;
     const id = randomUUID();
     const call: DirectCall = {
       invite: { id, chatId, kind, caller: { id: caller.userId, displayName } },
@@ -105,7 +106,7 @@ export class DirectCalls {
 
   accept(id: string, party: CallParty): DirectCall | null {
     const call = this.calls.get(id);
-    if (!call || call.calleeId !== party.userId || call.callee) return null;
+    if (!call || call.calleeId !== party.userId || call.callee || !this.supports(party, call.invite.kind)) return null;
     call.callee = party;
     clearTimeout(call.deadline);
     call.deadline = setTimeout(() => this.finish(id, 'ended'), maximumCallDuration).unref();
@@ -119,7 +120,7 @@ export class DirectCalls {
       this.finish(id, 'ended');
       return true;
     }
-    if (!call.callee && call.calleeId === party.userId) {
+    if (!call.callee && call.calleeId === party.userId && this.supports(party, call.invite.kind)) {
       this.finish(id, 'declined');
       return true;
     }
@@ -146,14 +147,19 @@ export class DirectCalls {
     return fromCaller ? call.callee.socketId : call.caller.socketId;
   }
 
-  disconnected(party: CallParty, isLastReadySocket: boolean): void {
+  disconnected(party: CallParty, hasReadySocket: (kind: CallKind) => boolean): void {
     const id = this.reservedUsers.get(party.userId);
     if (!id) return;
     const call = this.calls.get(id);
     if (!call) return;
-    if (this.sameSocket(call.caller, party) || (call.callee && this.sameSocket(call.callee, party)) || (!call.callee && isLastReadySocket)) {
+    const recipientUnavailable = !call.callee && call.calleeId === party.userId && !hasReadySocket(call.invite.kind);
+    if (this.sameSocket(call.caller, party) || (call.callee && this.sameSocket(call.callee, party)) || recipientUnavailable) {
       this.finish(id, 'disconnected');
     }
+  }
+
+  private supports(party: CallParty, kind: CallKind): boolean {
+    return kind === 'audio' || !party.audioOnly;
   }
 
   private sameSocket(first: CallParty, second: CallParty): boolean {

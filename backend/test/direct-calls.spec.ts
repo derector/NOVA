@@ -30,7 +30,7 @@ test('only the accepted endpoints can exchange signaling and hang up an active c
   assert.equal(calls.relay(id, callee, answer), caller.socketId);
   assert.equal(calls.hangUp(id, extraDevice), false);
   assert.equal(calls.hangUp(id, outsider), false);
-  calls.disconnected(extraDevice, false);
+  calls.disconnected(extraDevice, () => true);
   assert.equal(calls.hangUp(id, callee), true);
   assert.deepEqual(endings, ['ended']);
   assert.equal(calls.relay(id, caller, offer), null);
@@ -44,10 +44,25 @@ test('decline and disconnect release participants for their next call', () => {
   assert.equal(calls.hangUp(first.invite.id, callee), true);
   const second = calls.start('chat', 'audio', caller, 'Caller', callee.userId);
   assert.ok(second);
-  calls.disconnected(extraDevice, false);
+  calls.disconnected(extraDevice, () => true);
   assert.equal(calls.accept(second.invite.id, callee), second);
-  calls.disconnected(callee, true);
+  calls.disconnected(callee, () => false);
   assert.deepEqual(endings, ['declined', 'disconnected']);
+});
+
+test('an audio-only socket cannot start, accept or decline video calls', () => {
+  const calls = new DirectCalls(() => {});
+  const audioOnly = { ...extraDevice, audioOnly: true };
+  assert.equal(calls.start('chat', 'video', audioOnly, 'Other', caller.userId), null);
+  const video = calls.start('chat', 'video', caller, 'Caller', callee.userId);
+  assert.ok(video);
+  assert.equal(calls.accept(video.invite.id, audioOnly), null);
+  assert.equal(calls.hangUp(video.invite.id, audioOnly), false);
+  assert.equal(calls.hangUp(video.invite.id, caller), true);
+  const audio = calls.start('chat', 'audio', caller, 'Caller', callee.userId);
+  assert.ok(audio);
+  assert.equal(calls.accept(audio.invite.id, audioOnly), audio);
+  assert.equal(calls.hangUp(audio.invite.id, audioOnly), true);
 });
 
 test('ICE validation caps payload size and TURN credentials expire without exposing the shared secret', () => {

@@ -75,11 +75,15 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.nova.app.R
+import io.nova.app.NovaApplication
 import io.nova.app.data.local.ChatEntity
 import io.nova.app.data.local.MessageEntity
 import io.nova.app.data.remote.PublicUserDto
 import io.nova.app.domain.MessageRules
 import io.nova.app.feature.assistant.NovaAssistantAccess
+import io.nova.app.feature.calls.CallAction
+import io.nova.app.feature.calls.NovaCallDialog
+import io.nova.app.feature.calls.rememberCallPermission
 import io.nova.app.feature.updates.NovaUpdateNotice
 import io.nova.app.feature.updates.NovaUpdateSettings
 import java.time.Instant
@@ -92,6 +96,11 @@ private enum class AuthMode(val label: String) { REGISTER("Регистраци�
 @Composable
 fun NovaApp(viewModel: MainViewModel = viewModel()) {
     val context = LocalContext.current
+    val calls = (context.applicationContext as NovaApplication).container.calls
+    val callPanel by calls.panel.collectAsStateWithLifecycle()
+    val callNotice by calls.notice.collectAsStateWithLifecycle()
+    val callAvailable by calls.available.collectAsStateWithLifecycle()
+    val withMicrophone = rememberCallPermission(calls)
     val appearance = remember(context) { NovaAppearance(context.applicationContext) }
     val weather = observeNovaWeather(appearance.city, appearance.atmosphere)
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -117,6 +126,9 @@ fun NovaApp(viewModel: MainViewModel = viewModel()) {
             NovaAtmosphere(appearance.atmosphere, weather, Modifier.fillMaxSize())
             Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
                 if (!online) OfflineBanner(state.signedIn)
+                if (state.signedIn && callNotice != null) {
+                    CallNotice(callNotice.orEmpty(), onDismiss = calls::clearNotice)
+                }
                 AnimatedContent(
                     targetState = screen to state,
                     contentKey = { (route, value) -> if (route == Screen.CHAT) value.selectedChatId else route },
@@ -131,7 +143,13 @@ fun NovaApp(viewModel: MainViewModel = viewModel()) {
                         Screen.SETTINGS -> SettingsScreen(value, appearance, weather, viewModel)
                         Screen.CHAT -> value.selectedChatId?.let { chatId ->
                             chatDrafts.SaveableStateProvider("${value.userId}:$chatId") {
-                                ChatScreen(chatId, value, chats.firstOrNull { it.id == chatId }, viewModel)
+                                val chat = chats.firstOrNull { it.id == chatId }
+                                val onCall = chat?.takeIf { callAvailable && callPanel == null }?.let { peer ->
+                                    {
+                                        withMicrophone(CallAction.Start(chatId, peer.participantDisplayName.ifBlank { peer.participantUsername }))
+                                    }
+                                }
+                                ChatScreen(chatId, value, chat, viewModel, onCall)
                             }
                         }
                     }
@@ -148,6 +166,11 @@ fun NovaApp(viewModel: MainViewModel = viewModel()) {
             NovaUpdateNotice()
             if (state.signedIn && !state.profileRequired && assistantOpen) {
                 NovaAssistantAccess(onDismissRequest = { assistantOpen = false }, accessToken = viewModel::assistantAccessToken)
+            }
+            if (state.signedIn) {
+                callPanel?.let { panel ->
+                    NovaCallDialog(panel, { withMicrophone(CallAction.Accept(it)) }, calls::toggleMute, calls::hangUp)
+                }
             }
         }
     }
@@ -387,7 +410,7 @@ private fun SettingsScreen(state: MainUiState, appearance: NovaAppearance, weath
 }
 
 @Composable
-private fun ChatScreen(chatId: String, state: MainUiState, chat: ChatEntity?, viewModel: MainViewModel) {
+private fun ChatScreen(chatId: String, state: MainUiState, chat: ChatEntity?, viewModel: MainViewModel, onCall: (() -> Unit)?) {
     val messagesFlow = remember(chatId) { viewModel.messages(chatId) }
     val messages by messagesFlow.collectAsStateWithLifecycle(initialValue = emptyList())
     val newestFirst = remember(messages) { messages.asReversed() }
@@ -420,10 +443,13 @@ private fun ChatScreen(chatId: String, state: MainUiState, chat: ChatEntity?, vi
             ) {
                 TextButton(onClick = { viewModel.selectChat(null) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Назад") }
                 Column(Modifier.weight(1f)) {
-                    Text(chat?.participantDisplayName?.ifBlank { "Диалог" } ?: "Диалог", fontWeight = FontWeight.SemiBold)
+                    Text(chat?.participantDisplayName?.ifBlank { "Диалог" } ?: "Диалог", fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     chat?.let {
                         Text("@${it.participantUsername}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
                     }
+                }
+                if (onCall != null) {
+                    TextButton(onClick = onCall, modifier = Modifier.heightIn(min = 48.dp)) { Text("Позвонить") }
                 }
             }
         }
@@ -636,6 +662,16 @@ private fun Notice(text: String?) {
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
                     .semantics { liveRegion = LiveRegionMode.Polite },
             )
+        }
+    }
+}
+
+@Composable
+private fun CallNotice(text: String, onDismiss: () -> Unit) {
+    NovaGlassSurface(Modifier.fillMaxWidth().padding(horizontal = 12.dp), radius = 16.dp) {
+        Row(Modifier.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(text, Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text("Закрыть") }
         }
     }
 }

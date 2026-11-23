@@ -13,10 +13,19 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.resume
+
+internal data class CallEvent(val name: String, val payload: JSONObject)
 
 class RealtimeClient(private val repository: NovaRepository, private val baseUrl: String) {
     private val gson = Gson()
@@ -24,6 +33,10 @@ class RealtimeClient(private val repository: NovaRepository, private val baseUrl
     private val joinedChats = ConcurrentHashMap.newKeySet<String>()
     private var scope: CoroutineScope? = null
     private var chatsJob: Job? = null
+    private val callAvailability = MutableStateFlow(false)
+    private val callUpdates = Channel<CallEvent>(capacity = 256)
+    internal val callsAvailable = callAvailability.asStateFlow()
+    internal val callEvents = callUpdates.receiveAsFlow()
 
     @Synchronized
     fun start() {
@@ -51,9 +64,22 @@ class RealtimeClient(private val repository: NovaRepository, private val baseUrl
                 val connection = IO.socket(baseUrl.trimEnd('/'), options)
                 connection.on(Socket.EVENT_CONNECT) {
                     joinedChats.clear()
+                    connection.emit("call:ready", JSONObject().put("audioOnly", true), Ack { args ->
+                        val ack = args.firstOrNull() as? JSONObject
+                        if (socket === connection && connection.connected()) callAvailability.value = ack?.optBoolean("ok") == true
+                    })
                     activeScope.launch {
                         repository.chatIds().forEach { join(it) }
                         syncChats()
+                    }
+                }
+                connection.on(Socket.EVENT_DISCONNECT) {
+                    if (socket === connection) callAvailability.value = false
+                }
+                callEventNames.forEach { name ->
+                    connection.on(name) { args ->
+                        val payload = args.firstOrNull() as? JSONObject ?: return@on
+                        if (socket === connection) callUpdates.trySend(CallEvent(name, payload))
                     }
                 }
                 connection.on("chat:new") {
@@ -86,8 +112,24 @@ class RealtimeClient(private val repository: NovaRepository, private val baseUrl
         socket?.disconnect()
         socket?.off()
         socket = null
+        callAvailability.value = false
         scope?.cancel()
         scope = null
+    }
+
+    internal suspend fun requestCall(event: String, payload: JSONObject): JSONObject =
+        withTimeoutOrNull(6_000) {
+            val current = socket?.takeIf { it.connected() && callAvailability.value }
+                ?: error("Связь с сервером звонков отсутствует.")
+            suspendCancellableCoroutine { continuation ->
+                current.emit(event, payload, Ack { args ->
+                    if (continuation.isActive) continuation.resume(args.firstOrNull() as? JSONObject)
+                })
+            }
+        } ?: error("Сервер звонков не ответил.")
+
+    internal fun sendCall(event: String, payload: JSONObject) {
+        socket?.takeIf { it.connected() && callAvailability.value }?.emit(event, payload)
     }
 
     private suspend fun syncChats() {
@@ -122,5 +164,8 @@ class RealtimeClient(private val repository: NovaRepository, private val baseUrl
         })
     }
 
-    private companion object { const val TAG = "NovaRealtime" }
+    private companion object {
+        const val TAG = "NovaRealtime"
+        val callEventNames = listOf("call:invite", "call:accepted", "call:signal", "call:ended", "call:dismissed")
+    }
 }

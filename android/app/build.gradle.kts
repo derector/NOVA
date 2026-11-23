@@ -123,6 +123,7 @@ dependencies {
     implementation("com.google.firebase:firebase-messaging:25.1.3")
     implementation("com.google.android.gms:play-services-base:18.9.0")
     implementation("com.google.android.gms:play-services-tasks:18.4.0")
+    implementation("io.github.webrtc-sdk:android:150.7871.08")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlin:kotlin-test:2.0.21")

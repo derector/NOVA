@@ -50,9 +50,15 @@ The authoritative create/send operation is REST `POST /api/v1/chats/{chatId}/mes
 
 `notification:new` may later contain only an opaque resource identifier and event type; sensitive message content is excluded by default.
 
+### Direct call signaling
+
+`call:ready` advertises media capability on the authenticated connection. `{}` enables both audio and video. `{ "audioOnly": true }` enables audio. `call:start` accepts `{ chatId, kind }`, where `kind` is `audio` or `video`. Only compatible clients of the other chat member receive `call:invite`.
+
+`call:accept` and `call:end` accept `{ callId }`. Call invitation, acceptance and teardown are scoped to the authenticated participants. After acceptance, `call:signal` relays a description or ICE candidate only between the two selected sockets. The first accepted client wins and other compatible devices receive `call:dismissed`.
+
 ### Acknowledgements and errors
 
 - REST 201 is the server acknowledgement; a client must not mark a message delivered before receiving it.
-- Socket.IO acknowledgement callbacks are used for `chat:join`/`chat:leave` only and include a structured error on failure.
+- Acknowledged Socket.IO actions include a structured error on failure. Acknowledged call actions include `call:ready`, `call:start`, `call:accept` and `call:signal`.
 - Server events are idempotently merged by `id` and `clientMessageId`; repeated events must not duplicate the local row.
 - Reconnect catch-up uses REST cursor pagination. Socket delivery alone does not guarantee replay after disconnect.
