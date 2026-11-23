@@ -1,7 +1,8 @@
 import type { ApiErrorPayload } from '@/lib/types';
 
 const configuredBaseUrl = process.env.NEXT_PUBLIC_NOVA_API_BASE_URL?.trim();
-export const API_BASE_URL = (configuredBaseUrl || 'http://localhost:3001').replace(/\/+$/, '');
+const developmentBaseUrl = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3001';
+export const API_BASE_URL = (configuredBaseUrl || developmentBaseUrl).replace(/\/+$/, '');
 
 export class NovaApiError extends Error {
   status: number;
@@ -54,6 +55,9 @@ export async function apiFetch<T>(
   options: RequestInit = {},
   accessToken?: string,
 ): Promise<T> {
+  if (!API_BASE_URL) {
+    throw new NovaApiError({ status: 503, message: 'Регистрация и вход откроются после подключения сервера NOVA.' });
+  }
   const headers = new Headers(options.headers);
   if (typeof options.body === 'string' && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
