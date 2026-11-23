@@ -629,16 +629,17 @@ export default function HomePage() {
           <p className="auth-description">{screen === 'email'
             ? 'Введите электронную почту, чтобы получить одноразовый код.'
             : <>Введите код из письма для <strong>{email}</strong>.</>}</p>
+          {!API_BASE_URL && <Notice tone="info">Регистрация и вход откроются после подключения сервера NOVA.</Notice>}
           {notice && <div id="auth-error"><Notice>{notice}</Notice></div>}
           {success && <Notice tone="success">{success}</Notice>}
           {screen === 'email' ? <form className="form-stack" onSubmit={requestCode}>
             <label htmlFor="email">Email</label>
-            <input id="email" aria-describedby={notice ? "auth-error" : undefined} type="email" autoComplete="email" maxLength={320} required placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} />
-            <button className="button button-primary button-wide" type="submit" disabled={busy}>{busy ? <><span className="button-spinner" />Запрашиваем код…</> : <>Получить код <Icon name="arrow" size={18} /></>}</button>
+            <input id="email" aria-describedby={notice ? "auth-error" : undefined} type="email" disabled={!API_BASE_URL} autoComplete="email" maxLength={320} required placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} />
+            <button className="button button-primary button-wide" type="submit" disabled={busy || !API_BASE_URL}>{busy ? <><span className="button-spinner" />Запрашиваем код…</> : <>Получить код <Icon name="arrow" size={18} /></>}</button>
           </form> : <form className="form-stack" onSubmit={verifyCode}>
             <label htmlFor="otp">Одноразовый код</label>
             <input id="otp" aria-describedby={notice ? "auth-error" : undefined} className="otp-input" pattern="[0-9]{6,12}" inputMode="numeric" autoComplete="one-time-code" minLength={6} maxLength={12} required placeholder="000000" value={code} onChange={(event) => setCode(event.target.value)} />
-            <button className="button button-primary button-wide" type="submit" disabled={busy}>{busy ? <><span className="button-spinner" />Проверяем…</> : <>Подтвердить email <Icon name="arrow" size={18} /></>}</button>
+            <button className="button button-primary button-wide" type="submit" disabled={busy || !API_BASE_URL}>{busy ? <><span className="button-spinner" />Проверяем…</> : <>Подтвердить email <Icon name="arrow" size={18} /></>}</button>
             <button className="button button-quiet button-wide" type="button" onClick={() => { setScreen('email'); setNotice(''); setSuccess(''); setCode(''); }}>Изменить email или запросить новый код</button>
           </form>}
           {screen === 'email' && <div className="auth-mode">

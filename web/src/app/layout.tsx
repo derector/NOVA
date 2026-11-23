@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { NOVA_SITE_URL } from '@/lib/site';
+import { NOVA_INDEXABLE, NOVA_SITE_URL } from '@/lib/site';
 import { Appearance } from '@/components/appearance';
 import './globals.css';
 
@@ -8,7 +8,8 @@ export const metadata: Metadata = {
   description: 'NOVA — мессенджер для личных диалогов. Зарегистрируйтесь по электронной почте и начните переписку.',
   applicationName: 'NOVA',
   ...(NOVA_SITE_URL ? { metadataBase: NOVA_SITE_URL, alternates: { canonical: '/' } } : {}),
-  verification: { google: process.env.NOVA_GOOGLE_SITE_VERIFICATION },
+  robots: { index: NOVA_INDEXABLE, follow: NOVA_INDEXABLE },
+  verification: NOVA_INDEXABLE ? { google: process.env.NOVA_GOOGLE_SITE_VERIFICATION } : undefined,
 };
 
 export const viewport: Viewport = {

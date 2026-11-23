@@ -11,3 +11,5 @@ function publicSiteUrl(): URL | undefined {
 }
 
 export const NOVA_SITE_URL = publicSiteUrl();
+
+export const NOVA_INDEXABLE = Boolean(NOVA_SITE_URL) && (!process.env.VERCEL_ENV || process.env.VERCEL_ENV === 'production');
