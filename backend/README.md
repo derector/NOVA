@@ -19,7 +19,7 @@
 контейнеру на хосте. Миграции можно запустить отдельной командой до запуска API.
 
 ```sh
-docker run --rm --env-file /path/to/api.env nova-api dist/database/migrate.js
+docker run --rm --env-file /path/to/api.env nova-api node dist/database/migrate.js
 docker run --rm --env-file /path/to/api.env -p 3001:3001 nova-api
 ```
 
