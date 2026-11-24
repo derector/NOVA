@@ -1,7 +1,0 @@
-/.gradle
-/local.properties
-/.idea
-**/build
-*.iml
-/app/google-services.json
-/scripts/__pycache__/
