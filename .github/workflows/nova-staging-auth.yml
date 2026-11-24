@@ -1,0 +1,51 @@
+name: NOVA staging auth web verification
+on:
+  push:
+    branches: ['nova/staging-auth-readiness']
+    paths: ['web/**', '.github/workflows/nova-staging-auth.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    env:
+      NEXT_PUBLIC_NOVA_API_BASE_URL: ""
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Verify lint and types
+        run: npm run lint && npm run typecheck
+      - name: Build with backend unconfigured
+        run: npm run build
+      - name: Verify no-API page and robots
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run start -- -p 3000 > "$RUNNER_TEMP/nova-auth.log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/ -o "$RUNNER_TEMP/nova-auth.html"; then
+              grep -F 'Регистрация и вход откроются после подключения сервера NOVA.' "$RUNNER_TEMP/nova-auth.html"
+              grep -F 'id="auth-availability"' "$RUNNER_TEMP/nova-auth.html"
+              curl -fsS http://127.0.0.1:3000/robots.txt | grep -E 'Disallow: /'
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/nova-auth.log"
+          exit 1
